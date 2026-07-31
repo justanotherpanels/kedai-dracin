@@ -1,4 +1,4 @@
-import { redisPing, redisConfigured } from "@/lib/redis";
+import { redisPing } from "@/lib/redis";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -8,10 +8,7 @@ export async function GET() {
   return Response.json(
     {
       ok: redis.ok,
-      redis: {
-        configured: redisConfigured(),
-        ...redis,
-      },
+      redis,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

@@ -9,6 +9,7 @@ import {
   doodOrigin,
   extractDoodFileCode,
 } from "@/lib/dood-detect";
+import { getConfiguredProxyUrls, getPrimaryProxyUrl } from "@/lib/dood-proxy";
 import { redisGetJson, redisSetJson, RedisKeys } from "@/lib/redis";
 
 const execFileAsync = promisify(execFile);
@@ -32,8 +33,11 @@ function resolverUpstream(): string | null {
 }
 
 function proxyUrl(): string | undefined {
-  const raw = (process.env.DOOD_PROXY_URL || "").trim();
-  return raw || undefined;
+  return getPrimaryProxyUrl();
+}
+
+function proxyUrls(): string[] {
+  return getConfiguredProxyUrls();
 }
 
 function resolveCacheTtl(): number {
@@ -59,6 +63,8 @@ export type ResolvedDood = {
   referer: string;
   poster: string | null;
   title: string;
+  /** Absolute playable URL from upstream (e.g. PHP stream proxy) */
+  externalSrc?: string;
 };
 
 function isCloudflareInterstitial(html: string): boolean {
@@ -71,14 +77,57 @@ function isCloudflareInterstitial(html: string): boolean {
   );
 }
 
+function isVercelRuntime() {
+  return Boolean(process.env.VERCEL || process.env.VERCEL_ENV);
+}
+
+function doodApiKey(): string | null {
+  const raw = (
+    process.env.BASE_DOODSTREAM_API ||
+    process.env.DOOD_API_KEY ||
+    process.env.DOODSTREAM_API_KEY ||
+    ""
+  ).trim();
+  return raw || null;
+}
+
+function doodApiBases(): string[] {
+  return ["https://doodapi.com/api", "https://doodapi.co/api"];
+}
+
 function cfBlockedError() {
+  const hasUpstream = Boolean(resolverUpstream());
+  const hasApi = Boolean(doodApiKey());
+  if (isVercelRuntime() && !hasUpstream && !hasApi && !proxyUrl()) {
+    return new Error(
+      "Doodstream memblokir IP cloud. Set BASE_DOODSTREAM_API (premium aktif untuk file/direct_link) di Vercel, atau DOOD_RESOLVER_URL.",
+    );
+  }
+  if (hasApi) {
+    return new Error(
+      "Scrape Doodstream diblokir. API key ada tapi file/direct_link gagal — pastikan akun Doodstream Premium masih aktif.",
+    );
+  }
   return new Error(
-    "Cloudflare challenge memblokir resolve di server (Vercel). Set DOOD_RESOLVER_URL ke resolver di VPS/PC, atau player akan fallback ke embed.",
+    "Cloudflare/Doodstream memblokir resolve. Set BASE_DOODSTREAM_API (premium) atau DOOD_RESOLVER_URL.",
   );
 }
 
 function softBlockedMessage(status: number) {
+  if (doodApiKey()) {
+    return `pass_md5 tidak ditemukan (HTTP ${status}). Coba lewat API key / pastikan Premium aktif.`;
+  }
+  if (isVercelRuntime() && !resolverUpstream()) {
+    return cfBlockedError().message;
+  }
   return `pass_md5 tidak ditemukan di halaman embed (HTTP ${status})`;
+}
+
+function extractPassMd5Path(html: string): string | null {
+  // Unescape JS/JSON slash forms: \/pass_md5\/...
+  const normalized = html.replace(/\\+\//g, "/");
+  const match = normalized.match(/(\/pass_md5\/[a-zA-Z0-9_./-]+)/);
+  return match?.[1] ?? null;
 }
 
 let cachedCurl: string | null | undefined;
@@ -143,6 +192,8 @@ export async function getDoodClientStatus() {
     curl: await findCurlBinary(),
     resolverUpstream: resolverUpstream(),
     proxyConfigured: Boolean(proxyUrl()),
+    proxyCount: proxyUrls().length,
+    doodApiConfigured: Boolean(doodApiKey()),
   };
 }
 
@@ -294,18 +345,17 @@ function parseEmbedMeta(html: string, status: number): {
   poster: string | null;
   title: string;
 } {
-  const passMatch = html.match(/(\/pass_md5\/[a-zA-Z0-9_./-]+)/);
-  if (!passMatch) {
+  const passPath = extractPassMd5Path(html);
+  if (!passPath) {
     if (isCloudflareInterstitial(html)) throw cfBlockedError();
     throw new Error(softBlockedMessage(status));
   }
-  const passPath = passMatch[1];
 
   let token: string | null = null;
   const tokenFromPath = passPath.match(/\/pass_md5\/[^'"\s]+\/([a-zA-Z0-9]+)/);
   if (tokenFromPath) token = tokenFromPath[1];
   else {
-    const tokenFromHtml = html.match(/[?&]token=([a-zA-Z0-9]+)/);
+    const tokenFromHtml = html.replace(/\\+\//g, "/").match(/[?&]token=([a-zA-Z0-9]+)/);
     if (tokenFromHtml) token = tokenFromHtml[1];
   }
   if (!token) throw new Error("Token playback tidak ditemukan");
@@ -357,6 +407,7 @@ async function resolveViaUpstream(inputUrl: string): Promise<ResolvedDood | null
         referer?: string;
         poster?: string | null;
         title?: string;
+        src?: string;
         error?: string;
       }
     | null;
@@ -365,19 +416,34 @@ async function resolveViaUpstream(inputUrl: string): Promise<ResolvedDood | null
     throw new Error(data?.error || `Upstream resolver gagal (HTTP ${res.status})`);
   }
 
+  const fileCode = data.fileCode || extractDoodFileCode(inputUrl) || "unknown";
   const direct = data.direct || data.directLink;
-  const fileCode = data.fileCode || extractDoodFileCode(inputUrl);
-  if (!direct || !data.referer || !fileCode) {
-    throw new Error("Upstream resolver mengembalikan payload tidak lengkap");
+  const referer = data.referer;
+
+  // Format A: direct CDN + referer (dood-resolve-api.php)
+  if (direct && referer) {
+    return {
+      fileCode,
+      direct,
+      referer,
+      poster: data.poster ?? null,
+      title: data.title || "Doodstream",
+    };
   }
 
-  return {
-    fileCode,
-    direct,
-    referer: data.referer,
-    poster: data.poster ?? null,
-    title: data.title || "Doodstream",
-  };
+  // Format B: ready-to-play src (doodplayer.php?api=resolve)
+  if (data.src && /^https?:\/\//i.test(data.src)) {
+    return {
+      fileCode,
+      direct: data.src,
+      referer: referer || new URL(base).origin + "/",
+      poster: data.poster ?? null,
+      title: data.title || "Doodstream",
+      externalSrc: data.src,
+    };
+  }
+
+  throw new Error("Upstream resolver mengembalikan payload tidak lengkap");
 }
 
 async function resolveWithClient(
@@ -404,7 +470,7 @@ async function resolveWithClient(
       });
       const html = page.body;
 
-      if (!/\/pass_md5\//i.test(html)) {
+      if (!/\/pass_md5\//i.test(html.replace(/\\+\//g, "/")) && !extractPassMd5Path(html)) {
         lastError = isCloudflareInterstitial(html)
           ? cfBlockedError()
           : new Error(softBlockedMessage(page.status));
@@ -459,6 +525,125 @@ async function resolveWithClient(
   throw lastError ?? new Error("Gagal resolve Doodstream");
 }
 
+async function resolveViaOfficialApi(fileCode: string, inputUrl: string): Promise<ResolvedDood | null> {
+  const key = doodApiKey();
+  if (!key) return null;
+
+  let lastError: Error | null = null;
+
+  for (const base of doodApiBases()) {
+    try {
+      const directUrl = new URL(`${base}/file/direct_link`);
+      directUrl.searchParams.set("key", key);
+      directUrl.searchParams.set("file_code", fileCode);
+
+      const res = await fetch(directUrl.toString(), {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+        signal: AbortSignal.timeout(30_000),
+      });
+      const data = (await res.json().catch(() => null)) as {
+        status?: number | string;
+        msg?: string;
+        result?:
+          | string
+          | {
+              direct_link?: string;
+              ssl_direct_link?: string;
+              download_link?: string;
+              protected_dl?: string;
+              protected_download?: string;
+            }
+          | Array<{
+              direct_link?: string;
+              ssl_direct_link?: string;
+              download_link?: string;
+            }>;
+      } | null;
+
+      const statusNum = Number(data?.status);
+      const msg = data?.msg || "";
+
+      if (statusNum === 400 && /invalid operation|direct_link/i.test(msg)) {
+        throw new Error(
+          "Akun Doodstream tidak punya akses file/direct_link (Premium expired/nonaktif). Perpanjang Premium di doodstream.com/settings, atau API key tidak cukup.",
+        );
+      }
+
+      if (!res.ok || statusNum !== 200 || !data) {
+        lastError = new Error(msg || `Doodstream API gagal (HTTP ${res.status})`);
+        continue;
+      }
+
+      let direct: string | null = null;
+      const result = data.result;
+      if (typeof result === "string" && /^https?:\/\//i.test(result)) {
+        direct = result;
+      } else if (Array.isArray(result) && result[0]) {
+        const row = result[0];
+        direct = row.ssl_direct_link || row.direct_link || row.download_link || null;
+      } else if (result && typeof result === "object") {
+        const row = result as {
+          direct_link?: string;
+          ssl_direct_link?: string;
+          download_link?: string;
+          protected_dl?: string;
+          protected_download?: string;
+        };
+        direct =
+          row.ssl_direct_link ||
+          row.direct_link ||
+          row.download_link ||
+          row.protected_download ||
+          row.protected_dl ||
+          null;
+      }
+
+      if (!direct || !/^https?:\/\//i.test(direct)) {
+        lastError = new Error("Doodstream API tidak mengembalikan direct link");
+        continue;
+      }
+
+      let poster: string | null = null;
+      let title = "Doodstream";
+      try {
+        const infoUrl = new URL(`${base}/file/info`);
+        infoUrl.searchParams.set("key", key);
+        infoUrl.searchParams.set("file_code", fileCode);
+        const infoRes = await fetch(infoUrl.toString(), {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: AbortSignal.timeout(20_000),
+        });
+        const info = (await infoRes.json().catch(() => null)) as {
+          result?: Array<{ title?: string; single_img?: string; splash_img?: string }>;
+        } | null;
+        const row = info?.result?.[0];
+        if (row?.title) title = row.title;
+        poster = row?.single_img || row?.splash_img || null;
+      } catch {
+        /* optional */
+      }
+
+      return {
+        fileCode,
+        direct,
+        referer: `${doodOrigin(inputUrl)}/`,
+        poster,
+        title,
+      };
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      // Premium / invalid operation — don't try other base hosts for same error
+      if (/Premium|direct_link|tidak punya akses/i.test(lastError.message)) {
+        throw lastError;
+      }
+    }
+  }
+
+  throw lastError ?? new Error("Gagal resolve via Doodstream API");
+}
+
 export async function resolveDoodStream(
   inputUrl: string,
   options: { bypassCache?: boolean } = {},
@@ -476,10 +661,25 @@ export async function resolveDoodStream(
     }
   }
 
-  let resolved: ResolvedDood;
+  let resolved: ResolvedDood | null = null;
+  let apiError: Error | null = null;
 
-  // 1) External resolver (VPS / PC / ngrok) — recommended on Vercel
-  if (resolverUpstream()) {
+  // 0) Official Doodstream API (works on Vercel when Premium unlocks file/direct_link)
+  if (doodApiKey()) {
+    try {
+      resolved = await resolveViaOfficialApi(fileCode, inputUrl);
+    } catch (err) {
+      apiError = err instanceof Error ? err : new Error(String(err));
+    }
+  }
+
+  // External resolver/proxy required on Vercel when API failed / missing
+  if (!resolved && isVercelRuntime() && !resolverUpstream() && !proxyUrl()) {
+    throw apiError ?? cfBlockedError();
+  }
+
+  // 1) External resolver (VPS / PC / hosting PHP)
+  if (!resolved && resolverUpstream()) {
     try {
       const upstream = await resolveViaUpstream(inputUrl);
       if (upstream) {
@@ -489,14 +689,23 @@ export async function resolveDoodStream(
       }
     } catch (err) {
       const upstreamErr = err instanceof Error ? err : new Error(String(err));
+      if (isVercelRuntime()) throw apiError ?? upstreamErr;
       try {
         resolved = await resolveLocally(inputUrl, fileCode);
       } catch {
-        throw upstreamErr;
+        throw apiError ?? upstreamErr;
       }
     }
-  } else {
-    resolved = await resolveLocally(inputUrl, fileCode);
+  } else if (!resolved) {
+    try {
+      resolved = await resolveLocally(inputUrl, fileCode);
+    } catch (err) {
+      throw apiError ?? (err instanceof Error ? err : new Error(String(err)));
+    }
+  }
+
+  if (!resolved) {
+    throw apiError ?? new Error("Gagal resolve Doodstream");
   }
 
   const ttl = resolveCacheTtl();
@@ -510,31 +719,40 @@ export async function resolveDoodStream(
 async function resolveLocally(inputUrl: string, fileCode: string): Promise<ResolvedDood> {
   const Impit = await loadImpit();
   const browsers: ImpitBrowser[] = ["chrome", "chrome142", "chrome131", "firefox"];
-  const proxy = proxyUrl();
+  const proxies = proxyUrls();
+  // Always try direct first on non-Vercel; on Vercel prefer proxies then direct
+  const proxyAttempts: Array<string | undefined> = isVercelRuntime()
+    ? [...proxies, undefined]
+    : [undefined, ...proxies];
   let lastError: Error | null = null;
 
   if (Impit) {
-    for (const browser of browsers) {
-      try {
-        const client = new Impit({
-          browser,
-          timeout: 45_000,
-          followRedirects: true,
-          maxRedirects: 8,
-          cookieJar: createMemoryCookieJar(),
-          ...(proxy ? { proxyUrl: proxy } : {}),
-        }) as ImpitLike;
+    for (const proxy of proxyAttempts) {
+      for (const browser of browsers) {
+        try {
+          const client = new Impit({
+            browser,
+            timeout: 45_000,
+            followRedirects: true,
+            maxRedirects: 8,
+            cookieJar: createMemoryCookieJar(),
+            ...(proxy ? { proxyUrl: proxy } : {}),
+          }) as ImpitLike;
 
-        return await resolveWithClient(
-          (url, opts) => httpRequestImpit(client, url, opts),
-          inputUrl,
-          fileCode,
-        );
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-        // Retry next browser only on CF / soft-block style failures
-        const msg = lastError.message;
-        if (!/Cloudflare|pass_md5 tidak ditemukan/i.test(msg)) throw lastError;
+          return await resolveWithClient(
+            (url, opts) => httpRequestImpit(client, url, opts),
+            inputUrl,
+            fileCode,
+          );
+        } catch (err) {
+          lastError = err instanceof Error ? err : new Error(String(err));
+          const msg = lastError.message;
+          if (!/Cloudflare|pass_md5 tidak ditemukan|Premium|direct_link/i.test(msg)) {
+            // network/proxy errors → try next proxy/browser
+            if (/proxy|connect|tunnel|timeout|ECONN|ENOTFOUND/i.test(msg)) continue;
+            throw lastError;
+          }
+        }
       }
     }
   }

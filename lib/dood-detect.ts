@@ -29,11 +29,11 @@ const DOOD_HOSTS = [
 
 /** Preferred bootstrap hosts when resolving / retrying past Cloudflare. */
 export const DOOD_BOOTSTRAP_ORIGINS = [
+  "https://playmogo.com",
   "https://dsvplay.com",
   "https://doodstream.com",
   "https://dood.li",
   "https://dooood.com",
-  "https://playmogo.com",
 ] as const;
 
 function isDoodHost(host: string): boolean {

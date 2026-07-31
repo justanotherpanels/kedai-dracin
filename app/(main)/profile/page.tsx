@@ -6,7 +6,8 @@ import { EditProfileForm } from "@/components/account/EditProfileForm";
 import { useAuth } from "@/components/AuthProvider";
 import { apiRequest, ApiRequestError } from "@/lib/api";
 import { loginUrl } from "@/lib/auth-redirect";
-import type { CoinCancelPayload, CoinPayload } from "@/lib/types";
+import { extractPaymentChannels, resolvePaymentChannels } from "@/lib/coin-packages";
+import type { CoinCancelPayload, CoinPayload, PaymentChannel, PaymentChannelsPayload } from "@/lib/types";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
@@ -15,6 +16,8 @@ export default function ProfilePage() {
   const { user, token, logout, setUser, ready } = useAuth();
   const router = useRouter();
   const [coinData, setCoinData] = useState<CoinPayload | null>(null);
+  const [channels, setChannels] = useState<PaymentChannel[]>([]);
+  const [channelsError, setChannelsError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [cancelingId, setCancelingId] = useState<number | null>(null);
@@ -23,11 +26,41 @@ export default function ProfilePage() {
     if (!token) return;
     setLoading(true);
     setError(null);
+    setChannelsError(null);
     try {
       const res = await apiRequest<CoinPayload>("/coin", { token });
-      setCoinData(res.data);
-      if (user && res.data?.coin !== undefined) {
-        setUser({ ...user, coin: res.data.coin });
+      const data = res.data;
+      let fromCoin = extractPaymentChannels(data);
+      let endpointPayload: unknown = null;
+      let channelFetchError: string | null = null;
+
+      // §6.1 — fallback ke GET /payment/channels jika /coin belum kirim channel
+      if (!fromCoin.length) {
+        try {
+          const ch = await apiRequest<PaymentChannelsPayload>("/payment/channels", {
+            token,
+            method: "GET",
+          });
+          endpointPayload = ch.data;
+        } catch (err) {
+          channelFetchError =
+            err instanceof ApiRequestError
+              ? err.message
+              : "Channel pembayaran sedang tidak tersedia.";
+        }
+      }
+
+      const resolved = resolvePaymentChannels(fromCoin, endpointPayload);
+      setChannels(resolved);
+      if (!resolved.length) {
+        setChannelsError(
+          channelFetchError ||
+            "Belum ada channel pembayaran aktif dari gateway.",
+        );
+      }
+      setCoinData(data);
+      if (user && data?.coin !== undefined) {
+        setUser({ ...user, coin: data.coin });
       }
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : "Gagal memuat akun.");
@@ -101,7 +134,12 @@ export default function ProfilePage() {
         <div className="mb-4 rounded-2xl bg-rose-500/10 px-4 py-3 text-sm text-rose-300">{error}</div>
       )}
 
-      <BuyCoinPanel packages={coinData?.packages} onChanged={() => void load()} />
+      <BuyCoinPanel
+        packages={coinData?.packages}
+        channels={channels}
+        channelsError={channelsError}
+        onChanged={() => void load()}
+      />
       <EditProfileForm onUpdated={() => void load()} />
 
       <section className="mb-6">

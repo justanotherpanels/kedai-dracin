@@ -68,7 +68,7 @@ export function PaymentQr({ payment, allowPaymentUrl = true }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [payment, allowPaymentUrl]);
+  }, [payment.qr_image, payment.qr_url, payment.qr_content, payment.qr_string, payment.payment_url, allowPaymentUrl]);
 
   if (busy) {
     return (

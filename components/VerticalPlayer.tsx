@@ -63,7 +63,11 @@ async function resolvePlayableSrc(raw: string): Promise<ResolvedPlayable> {
     const res = await fetch(endpoint, { cache: "no-store", credentials: "same-origin" });
     const data = (await res.json()) as ResolveResponse;
     if (!data.ok || !data.src) {
-      throw new Error(data.error || "Gagal resolve");
+      const hint =
+        typeof (data as { hint?: string }).hint === "string"
+          ? ` ${(data as { hint?: string }).hint}`
+          : "";
+      throw new Error((data.error || "Gagal resolve") + hint);
     }
     return {
       playSrc: data.src,

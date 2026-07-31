@@ -1,5 +1,4 @@
 import { createStreamTicket, resolveDoodStream } from "@/lib/doodstream";
-import { toDoodEmbedUrl } from "@/lib/dood-detect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -17,7 +16,9 @@ export async function GET(request: Request) {
 
   try {
     const resolved = await resolveDoodStream(url, { bypassCache });
-    const ticket = createStreamTicket(resolved.direct, resolved.referer);
+    const src = resolved.externalSrc
+      ? resolved.externalSrc
+      : `/api/dood/stream?t=${encodeURIComponent(createStreamTicket(resolved.direct, resolved.referer))}`;
     return Response.json(
       {
         ok: true,
@@ -25,19 +26,24 @@ export async function GET(request: Request) {
         poster: resolved.poster,
         title: resolved.title,
         type: "video/mp4",
-        src: `/api/dood/stream?t=${encodeURIComponent(ticket)}`,
+        src,
       },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Gagal resolve Doodstream";
-    const embedUrl = toDoodEmbedUrl(url);
+    const needsResolver =
+      /DOOD_RESOLVER_URL|Vercel|pass_md5|Cloudflare|hosting/i.test(message) &&
+      !process.env.DOOD_RESOLVER_URL;
     return Response.json(
       {
         ok: false,
         error: message,
-        fallback: embedUrl ? "embed" : null,
-        embedUrl,
+        hint: needsResolver
+          ? "Set BASE_DOODSTREAM_API di Vercel (butuh Premium aktif untuk file/direct_link). Premium akun Anda tercatat expired 2025-01-24."
+          : undefined,
+        fallback: null,
+        embedUrl: null,
       },
       { status: 400, headers: { "Cache-Control": "no-store" } },
     );

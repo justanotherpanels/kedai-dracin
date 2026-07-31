@@ -68,7 +68,7 @@ function pickNumber(...values: unknown[]): number | undefined {
 
 /**
  * Normalize various PG / API response shapes into PaymentPayload.
- * Handles flat fields and nested `payment` / `data` / `qr` / `va` objects.
+ * Handles flat fields and nested `payment` / `data` / `qr` / `va` / `qris` objects.
  */
 export function normalizePaymentPayload(
   raw: unknown,
@@ -77,7 +77,13 @@ export function normalizePaymentPayload(
   const root = asRecord(raw) ?? {};
   const nestedPayment = asRecord(root.payment);
   const nestedData = asRecord(root.data);
-  const nestedQr = asRecord(root.qr) ?? asRecord(nestedPayment?.qr) ?? asRecord(nestedData?.qr);
+  const nestedQr =
+    asRecord(root.qr) ??
+    asRecord(root.qris) ??
+    asRecord(nestedPayment?.qr) ??
+    asRecord(nestedPayment?.qris) ??
+    asRecord(nestedData?.qr) ??
+    asRecord(nestedData?.qris);
   const nestedVa =
     asRecord(root.va) ??
     asRecord(root.virtual_account) ??
@@ -85,10 +91,17 @@ export function normalizePaymentPayload(
     asRecord(nestedPayment?.virtual_account) ??
     asRecord(nestedData?.va) ??
     asRecord(nestedData?.virtual_account);
+  const nestedGateway =
+    asRecord(root.gateway) ??
+    asRecord(root.pg) ??
+    asRecord(root.gateway_response) ??
+    asRecord(nestedPayment?.gateway) ??
+    asRecord(nestedData?.gateway);
 
   const layers: LooseRecord[] = [root];
   if (nestedPayment) layers.push(nestedPayment);
   if (nestedData) layers.push(nestedData);
+  if (nestedGateway) layers.push(nestedGateway);
 
   const get = (...keys: string[]): unknown => {
     for (const layer of layers) {
@@ -105,49 +118,73 @@ export function normalizePaymentPayload(
     pickNumber(get("payment_id", "id", "paymentId"), fallback.payment_id) ?? 0;
 
   const qrImage = pickString(
-    get("qr_image", "qrImage", "qr_image_url"),
+    get("qr_image", "qrImage", "qr_image_url", "qr_img"),
     nestedQr?.image,
     nestedQr?.qr_image,
+    nestedQr?.img,
     fallback.qr_image,
   );
   const qrUrl = pickString(
-    get("qr_url", "qrUrl", "qr_link"),
+    get("qr_url", "qrUrl", "qr_link", "qrcode_url"),
     nestedQr?.url,
     nestedQr?.qr_url,
+    nestedQr?.link,
     fallback.qr_url,
   );
   // `qris` may be EMV string or nested object with string/content
-  const qrisRaw = get("qris", "qr");
+  const qrisRaw = get("qris", "qr", "qrcode");
   const qrisAsRecord = asRecord(qrisRaw);
   const qrContent = pickString(
-    get("qr_content", "qr_string", "qr_code", "qrString", "qrContent", "qr_data", "qrData"),
+    get(
+      "qr_content",
+      "qr_string",
+      "qr_code",
+      "qrString",
+      "qrContent",
+      "qr_data",
+      "qrData",
+      "qris_string",
+      "qr_value",
+    ),
     typeof qrisRaw === "string" ? qrisRaw : null,
     qrisAsRecord?.content,
     qrisAsRecord?.string,
     qrisAsRecord?.code,
     qrisAsRecord?.data,
+    qrisAsRecord?.qr_string,
     nestedQr?.content,
     nestedQr?.string,
     nestedQr?.code,
     nestedQr?.data,
+    nestedQr?.qr_string,
     fallback.qr_content,
   );
   const vaNumber = pickString(
-    get("va_number", "vaNumber", "virtual_account", "virtual_account_number", "va"),
+    get("va_number", "vaNumber", "virtual_account", "virtual_account_number", "account_number"),
+    typeof get("va") === "string" || typeof get("va") === "number" ? get("va") : null,
     nestedVa?.number,
     nestedVa?.va_number,
     nestedVa?.account,
+    nestedVa?.account_number,
     fallback.va_number,
   );
   const paymentCode = pickString(
-    get("payment_code", "pay_code", "payCode", "kode_bayar", "bill_code"),
+    get("payment_code", "pay_code", "payCode", "kode_bayar", "bill_code", "pay_number"),
     nestedVa?.payment_code,
     fallback.payment_code,
   );
 
   // Prefer explicit payment URL keys; avoid generic `url` stealing QR asset URLs
   const paymentUrl = pickString(
-    get("payment_url", "paymentUrl", "checkout_url", "checkoutUrl", "pay_url"),
+    get(
+      "payment_url",
+      "paymentUrl",
+      "checkout_url",
+      "checkoutUrl",
+      "pay_url",
+      "invoice_url",
+      "checkout_link",
+    ),
     fallback.payment_url,
   );
 
@@ -160,18 +197,30 @@ export function normalizePaymentPayload(
     coin_balance: pickNumber(get("coin_balance", "coinBalance"), fallback.coin_balance),
     amount: pickNumber(get("amount", "price", "total"), fallback.amount),
     coin: pickNumber(get("coin", "coins"), fallback.coin),
-    method: pickString(get("method", "payment_method", "channel"), fallback.method),
+    method: pickString(get("method", "payment_method", "channel", "payment_method_code"), fallback.method),
+    payment_type: pickString(
+      get("payment_type", "paymentType", "type_payment"),
+      fallback.payment_type,
+    ),
     qr_url: qrUrl,
     qr_image: qrImage,
     qr_content: qrContent,
+    qr_string: pickString(get("qr_string"), fallback.qr_string) ?? qrContent,
     payment_code: paymentCode,
     va_number: vaNumber,
+    gateway_reference: pickString(
+      get("gateway_reference", "gateway_ref", "pg_reference", "tripay_reference"),
+      fallback.gateway_reference,
+    ),
     expired_at: pickString(
-      get("expired_at", "expiredAt", "expires_at", "expiry"),
+      get("expired_at", "expiredAt", "expires_at", "expiry", "expired_time"),
       nestedVa?.expired_at,
       fallback.expired_at,
     ),
-    transaction_id: pickNumber(get("transaction_id", "reference_id", "coin_transaction_id"), fallback.transaction_id),
+    transaction_id: pickNumber(
+      get("transaction_id", "reference_id", "coin_transaction_id"),
+      fallback.transaction_id,
+    ),
   };
 }
 
@@ -179,9 +228,21 @@ function isLikelyImageUrl(value: string): boolean {
   return /\.(png|jpe?g|webp|gif|svg)(\?|$)/i.test(value) || value.startsWith("data:image/");
 }
 
+function isLikelyHttpUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value.trim());
+}
+
 function isLikelyQrisEmv(value: string): boolean {
   // EMVCo QRIS payloads typically start with "000201"
   return /^000201/.test(value.trim());
+}
+
+function isUsableQrText(value: string): boolean {
+  const v = value.trim();
+  if (!v) return false;
+  // Placeholder sandbox Tripay — jangan di-encode jadi QR
+  if (/^sandbox mode$/i.test(v)) return false;
+  return isLikelyQrisEmv(v) || v.length >= 20;
 }
 
 export type QrPayload =
@@ -189,8 +250,8 @@ export type QrPayload =
   | { kind: "text"; value: string };
 
 /**
- * Pick best QR source from payment payload.
- * Docs only guarantee payment_url — we generate QR from that when needed.
+ * Pilih sumber QR sesuai DOKUMENTASI §4.2:
+ * payment_url | qr_string/qr_content (EMV) | qr_url/qr_image
  */
 export function resolveQrPayload(
   payment: PaymentPayload,
@@ -198,32 +259,37 @@ export function resolveQrPayload(
 ): QrPayload | null {
   const allowPaymentUrl = options.allowPaymentUrl !== false;
 
-  if (payment.qr_image?.trim()) {
-    const img = payment.qr_image.trim();
-    if (img.startsWith("data:")) return { kind: "image", value: img };
-    if (/^[A-Za-z0-9+/=]+$/.test(img.slice(0, 80)) && !img.startsWith("http")) {
-      return { kind: "image", value: `data:image/png;base64,${img}` };
+  const asImageUrl = (raw: string | null | undefined): QrPayload | null => {
+    const value = raw?.trim();
+    if (!value) return null;
+    if (value.startsWith("data:image/")) return { kind: "image", value };
+    if (isLikelyHttpUrl(value) || isLikelyImageUrl(value)) return { kind: "image", value };
+    // raw base64 tanpa prefix
+    if (/^[A-Za-z0-9+/=]+$/.test(value.slice(0, 80)) && !value.startsWith("http") && value.length > 64) {
+      return { kind: "image", value: `data:image/png;base64,${value}` };
     }
-    if (isLikelyImageUrl(img) || /^https?:\/\//i.test(img)) {
-      return { kind: "image", value: img };
-    }
-    // raw base64-ish without prefix already handled; otherwise treat as text to encode
-    return { kind: "text", value: img };
-  }
+    return null;
+  };
 
-  if (payment.qr_url?.trim()) {
-    const url = payment.qr_url.trim();
-    if (isLikelyImageUrl(url)) return { kind: "image", value: url };
-    return { kind: "text", value: url };
-  }
+  // 1) Gambar dari gateway (Tripay qr_url / qr_image)
+  const fromImage =
+    asImageUrl(payment.qr_image) ||
+    asImageUrl(payment.qr_url);
+  if (fromImage) return fromImage;
 
-  if (payment.qr_content?.trim()) {
-    return { kind: "text", value: payment.qr_content.trim() };
-  }
+  // 2) EMV string (qr_string / qr_content)
+  const emv =
+    [payment.qr_string, payment.qr_content]
+      .map((v) => v?.trim())
+      .find((v) => v && isUsableQrText(v)) ?? null;
+  if (emv) return { kind: "text", value: emv };
 
+  // 3) payment_url — generate QR dari URL checkout
   const payUrl = payment.payment_url?.trim();
   if (payUrl) {
-    if (isLikelyImageUrl(payUrl)) return { kind: "image", value: payUrl };
+    if (isLikelyImageUrl(payUrl) || (isLikelyHttpUrl(payUrl) && /\.(png|jpe?g|webp|gif)(\?|$)/i.test(payUrl))) {
+      return { kind: "image", value: payUrl };
+    }
     if (isLikelyQrisEmv(payUrl) || allowPaymentUrl) {
       return { kind: "text", value: payUrl };
     }

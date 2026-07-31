@@ -250,6 +250,8 @@ Pakai tabel `coin_packages` + `coin_transactions` + Payment Gateway yang sama de
 
 `GET /api/v2/coin`
 
+Response menyertakan `packages` dan `payment_channels` (channel aktif dari payment gateway, termasuk QRIS & Virtual Account jika aktif di PG). Pakai `payment_channels[].code` sebagai `method` saat top-up.
+
 **Response 200**
 
 ```json
@@ -274,6 +276,24 @@ Pakai tabel `coin_packages` + `coin_transactions` + Payment Gateway yang sama de
         "coin": 50,
         "price": 10000
       }
+    ],
+    "payment_channels": [
+      {
+        "code": "QRIS",
+        "name": "QRIS",
+        "payment_type": "EWALLET",
+        "icon_url": null,
+        "fee_customer": null,
+        "fee_merchant": null
+      },
+      {
+        "code": "BNIVA",
+        "name": "BNI Virtual Account",
+        "payment_type": "VIRTUAL_ACCOUNT",
+        "icon_url": null,
+        "fee_customer": null,
+        "fee_merchant": null
+      }
     ]
   }
 }
@@ -288,7 +308,9 @@ Pakai tabel `coin_packages` + `coin_transactions` + Payment Gateway yang sama de
 | Field | Type | Wajib |
 |---|---|---|
 | package_id | int | ya |
-| method | string | ya (kode channel PG) |
+| method | string | ya (kode channel aktif dari PG) |
+
+`method` harus kode channel aktif dari `GET /payment/channels` atau `payment_channels` di `GET /coin`. Metode tidak valid/tidak aktif → `422`.
 
 Tagihan = `coin_packages.price`. Coin masuk = `coin_packages.coin` setelah lunas.
 
@@ -302,11 +324,23 @@ Tagihan = `coin_packages.price`. Coin masuk = `coin_packages.coin` setelah lunas
     "coin": 50,
     "amount": 10000,
     "status": "pending",
+    "method": "QRIS",
+    "payment_type": "EWALLET",
     "payment_url": "https://...",
-    "reference": "COIN-101"
+    "qr_string": "00020101021226...",
+    "qr_content": "00020101021226...",
+    "qr_url": "https://.../qr.png",
+    "qr_image": "https://.../qr.png",
+    "va_number": null,
+    "payment_code": null,
+    "reference": "COIN-101",
+    "gateway_reference": "T123456"
   }
 }
 ```
+
+Untuk QRIS, frontend pakai salah satu: `payment_url`, `qr_string`/`qr_content` (EMV), atau `qr_url`/`qr_image`.  
+Untuk Virtual Account, pakai `va_number` / `payment_code`. Field yang tidak relevan bernilai `null`.
 
 ### 4.3 Canceled
 
@@ -388,7 +422,43 @@ Bearer token wajib.
 
 Integrasi dengan gateway yang sudah ada (`PG_BASE_URL`, `PG_API_KEY`, `PG_KODE_API`).
 
-### 6.1 Add (ambil info pembayaran)
+Channel (QRIS, Virtual Account, e-wallet, dll.) tidak di-hardcode — diambil dari PG. Hanya channel yang **aktif** yang dikembalikan.
+
+### 6.1 Channel pembayaran aktif
+
+`GET /api/v2/payment/channels`
+
+**Response 200**
+
+```json
+{
+  "status": "success",
+  "data": {
+    "channels": [
+      {
+        "code": "QRIS",
+        "name": "QRIS",
+        "payment_type": "EWALLET",
+        "icon_url": null,
+        "fee_customer": null,
+        "fee_merchant": null
+      },
+      {
+        "code": "BNIVA",
+        "name": "BNI Virtual Account",
+        "payment_type": "VIRTUAL_ACCOUNT",
+        "icon_url": null,
+        "fee_customer": null,
+        "fee_merchant": null
+      }
+    ]
+  }
+}
+```
+
+Pakai `channels[].code` sebagai `method` di `POST /coin`.
+
+### 6.2 Add (ambil info pembayaran)
 
 `POST /api/v2/payment`
 
@@ -408,13 +478,22 @@ Integrasi dengan gateway yang sudah ada (`PG_BASE_URL`, `PG_API_KEY`, `PG_KODE_A
   "data": {
     "payment_id": 55,
     "status": "pending",
-    "payment_url": "https://...",
-    "reference": "COIN-55"
+    "method": "BNIVA",
+    "payment_type": "VIRTUAL_ACCOUNT",
+    "payment_url": null,
+    "qr_string": null,
+    "qr_content": null,
+    "qr_url": null,
+    "qr_image": null,
+    "va_number": "8808123456789012",
+    "payment_code": "8808123456789012",
+    "reference": "COIN-55",
+    "gateway_reference": "T123456"
   }
 }
 ```
 
-### 6.2 Update (sinkron status)
+### 6.3 Update (sinkron status)
 
 `POST /api/v2/payment/{payment_id}/update`
 
@@ -786,6 +865,7 @@ Bearer token wajib.
 | Coin | POST | `/coin/{id}/cancel` | Bearer |
 | Account | PUT | `/account` | Bearer |
 | Account | DELETE | `/account` | Bearer |
+| Payment | GET | `/payment/channels` | Bearer |
 | Payment | POST | `/payment` | Bearer |
 | Payment | POST | `/payment/{id}/update` | Bearer |
 | Play | GET | `/play/drama` | publik* |

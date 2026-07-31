@@ -8,7 +8,7 @@ import { MobileShell } from "@/components/MobileShell";
 import { PaymentQr } from "@/components/PaymentQr";
 import { apiRequest, ApiRequestError } from "@/lib/api";
 import { loginUrl } from "@/lib/auth-redirect";
-import { getPaymentMethod, getPaymentMethodKind, PAYMENT_METHODS } from "@/lib/coin-packages";
+import { getPaymentMethodKind } from "@/lib/coin-packages";
 import {
   clearPaymentSession,
   loadPaymentSession,
@@ -49,7 +49,11 @@ export default function PaymentCheckoutPage() {
   }, [ready, token, router, paymentId]);
 
   const methodKind = useMemo(
-    () => getPaymentMethodKind(session?.method ?? session?.payment.method),
+    () =>
+      getPaymentMethodKind(
+        session?.method ?? session?.payment.method,
+        session?.payment.payment_type,
+      ),
     [session],
   );
   const isVa = methodKind === "va";
@@ -66,12 +70,7 @@ export default function PaymentCheckoutPage() {
     () => (session ? (isVa ? resolveVaNumber(session.payment) : resolvePaymentCode(session.payment)) : null),
     [session, isVa],
   );
-  const methodLabel =
-    session?.methodLabel ||
-    getPaymentMethod(session?.method)?.label ||
-    PAYMENT_METHODS.find((m) => m.code === session?.method)?.label ||
-    session?.method ||
-    "Pembayaran";
+  const methodLabel = session?.methodLabel || session?.method || "Pembayaran";
 
   const copyCode = async () => {
     if (!payCode) return;
@@ -91,6 +90,51 @@ export default function PaymentCheckoutPage() {
     },
     [],
   );
+
+  const refreshPaymentInfo = useCallback(async () => {
+    if (!token || !session) return false;
+    setLoading(true);
+    setError(null);
+    try {
+      const pay = await apiRequest<PaymentPayload>("/payment", {
+        token,
+        body: {
+          type: "coin",
+          reference_id: session.transactionId,
+          method: session.method,
+        },
+      });
+      const nextSession = applyPaymentUpdate(session, pay.data);
+      setSession(nextSession);
+      savePaymentSession(nextSession);
+      const hasQr = Boolean(resolveQrPayload(nextSession.payment, { allowPaymentUrl: true }));
+      const hasVa = Boolean(resolveVaNumber(nextSession.payment));
+      if (!hasQr && !hasVa && !nextSession.payment.payment_url) {
+        setError(
+          "Info bayar belum lengkap dari gateway (belum ada payment_url / QR / VA). Coba muat ulang.",
+        );
+        return false;
+      }
+      setMessage(null);
+      return true;
+    } catch (err) {
+      setError(err instanceof ApiRequestError ? err.message : "Gagal memuat info pembayaran.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
+  }, [token, session, applyPaymentUpdate]);
+
+  // Jika sesi belum punya QR/VA, muat ulang dari POST /payment
+  useEffect(() => {
+    if (!token || !session) return;
+    const hasQr = Boolean(resolveQrPayload(session.payment, { allowPaymentUrl: true }));
+    const hasVa = Boolean(resolveVaNumber(session.payment));
+    if (hasQr || hasVa || session.payment.payment_url) return;
+    void refreshPaymentInfo();
+    // hanya sekali saat sesi pertama kali terbaca tanpa QR
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, session?.payment.payment_id]);
 
   const syncPayment = useCallback(async () => {
     if (!token || !session) return;
@@ -245,8 +289,18 @@ export default function PaymentCheckoutPage() {
                     </div>
                   ) : (
                     <div className="rounded-xl bg-black/25 px-4 py-6 text-center text-sm text-white/55">
-                      Nomor VA belum tersedia dari gateway.
-                      {session.payment.payment_url ? " Gunakan tombol buka pembayaran." : ""}
+                      Nomor VA belum dikirim gateway.
+                      {session.payment.reference ? (
+                        <p className="mt-2 text-xs text-white/40">Ref: {session.payment.reference}</p>
+                      ) : null}
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={() => void refreshPaymentInfo()}
+                        className="mt-4 flex h-11 w-full items-center justify-center rounded-full bg-white/10 text-sm font-semibold text-white"
+                      >
+                        {loading ? "Memuat..." : "Muat ulang nomor VA"}
+                      </button>
                     </div>
                   )}
                 </>
@@ -263,11 +317,27 @@ export default function PaymentCheckoutPage() {
                       <PaymentQr payment={session.payment} allowPaymentUrl />
                     ) : (
                       <div className="px-4 text-center text-sm text-[#1a0b10]/70">
-                        QR belum tersedia dari gateway.
-                        {session.payment.payment_url ? " Gunakan tombol buka pembayaran." : ""}
+                        QR belum dikirim gateway.
+                        {session.payment.reference ? (
+                          <>
+                            <br />
+                            Ref: {session.payment.reference}
+                          </>
+                        ) : null}
                       </div>
                     )}
                   </div>
+
+                  {!hasQrSource && (
+                    <button
+                      type="button"
+                      disabled={loading}
+                      onClick={() => void refreshPaymentInfo()}
+                      className="mt-4 flex h-11 w-full items-center justify-center rounded-full bg-white/10 text-sm font-semibold"
+                    >
+                      {loading ? "Memuat..." : "Muat ulang QR"}
+                    </button>
+                  )}
 
                   {payCode && !hasQrSource && (
                     <div className="mt-5 rounded-xl bg-black/25 px-4 py-3">

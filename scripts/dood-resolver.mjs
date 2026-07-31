@@ -20,11 +20,11 @@ const UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 const BOOTSTRAP = [
+  "https://playmogo.com",
   "https://dsvplay.com",
   "https://doodstream.com",
   "https://dood.li",
   "https://dooood.com",
-  "https://playmogo.com",
 ];
 
 function extractCode(input) {
@@ -192,4 +192,11 @@ createServer(async (req, res) => {
   }
 }).listen(PORT, () => {
   console.log(`Dood resolver listening on http://127.0.0.1:${PORT}/resolve?url=...`);
+  console.log("");
+  console.log("Tanpa VPS (PC Windows + Cloudflare Tunnel):");
+  console.log("  1) Biarkan proses ini tetap jalan");
+  console.log("  2) cloudflared tunnel --url http://127.0.0.1:" + PORT);
+  console.log("  3) Vercel env DOOD_RESOLVER_URL=https://<id>.trycloudflare.com/resolve");
+  console.log("  4) Redeploy Vercel");
+  console.log("");
 });

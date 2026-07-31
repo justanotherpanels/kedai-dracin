@@ -1,15 +1,22 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { getPaymentMethod, PAYMENT_METHODS } from "@/lib/coin-packages";
+import { channelsToPaymentMethods } from "@/lib/coin-packages";
 import { apiRequest, ApiRequestError } from "@/lib/api";
 import { normalizePaymentPayload, savePaymentSession } from "@/lib/payment-session";
-import type { CoinPackage, CoinPurchasePayload, PaymentPayload } from "@/lib/types";
+import type {
+  CoinPackage,
+  CoinPurchasePayload,
+  PaymentChannel,
+  PaymentPayload,
+} from "@/lib/types";
 
 type Props = {
   packages?: CoinPackage[];
+  channels?: PaymentChannel[];
+  channelsError?: string | null;
   onChanged: () => void;
 };
 
@@ -19,62 +26,70 @@ function normalizePackage(pkg: CoinPackage): CoinPackage & { label: string; amou
   return { ...pkg, label, amount };
 }
 
-export function BuyCoinPanel({ packages = [], onChanged }: Props) {
+export function BuyCoinPanel({
+  packages = [],
+  channels = [],
+  channelsError = null,
+  onChanged,
+}: Props) {
   const { token } = useAuth();
   const router = useRouter();
   const list = useMemo(
     () => (packages.length ? packages : []).map(normalizePackage),
     [packages],
   );
+  // §4.1 / §6.1 — method hanya dari payment_channels API (tidak di-hardcode)
+  const methods = useMemo(() => channelsToPaymentMethods(channels), [channels]);
   const [open, setOpen] = useState(false);
   const [packageId, setPackageId] = useState<number | null>(null);
-  const [method, setMethod] = useState<string>(PAYMENT_METHODS[0].code);
+  const [method, setMethod] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    if (!methods.length) {
+      setMethod("");
+      return;
+    }
+    setMethod((prev) => (methods.some((m) => m.code === prev) ? prev : methods[0].code));
+  }, [methods]);
+
   const selected =
     list.find((p) => p.id === (packageId ?? list[0]?.id)) ?? list[0] ?? null;
+  const selectedMethod = methods.find((m) => m.code === method) ?? methods[0] ?? null;
 
   const buy = async () => {
-    if (!token || !selected) return;
+    if (!token || !selected || !selectedMethod) return;
     setLoading(true);
     setError(null);
     try {
-      // §4.2 Add Coin — buat invoice
+      // POST /coin — method = payment_channels[].code
       const res = await apiRequest<CoinPurchasePayload>("/coin", {
         token,
         body: {
           package_id: selected.id,
-          method,
+          method: selectedMethod.code,
         },
       });
 
-      // §6.1 Payment Add — ambil info pembayaran (QR / VA) — wajib
+      // POST /payment — ambil info bayar (QR / VA) §6.2
       const pay = await apiRequest<PaymentPayload>("/payment", {
         token,
         body: {
           type: "coin",
           reference_id: res.data.transaction_id,
-          method,
+          method: selectedMethod.code,
         },
       });
 
-      const methodMeta = getPaymentMethod(method);
+      // /payment primary; /coin sebagai fallback (null di /payment tidak menimpa QR dari /coin)
       const merged = normalizePaymentPayload(pay.data, {
+        ...res.data,
         payment_id: pay.data.payment_id,
-        status: res.data.status ?? "pending",
-        payment_url: res.data.payment_url ?? null,
-        reference: res.data.reference,
+        transaction_id: res.data.transaction_id,
         amount: res.data.amount,
         coin: res.data.coin,
-        method,
-        qr_url: res.data.qr_url ?? null,
-        qr_image: res.data.qr_image ?? null,
-        qr_content: res.data.qr_content ?? null,
-        payment_code: res.data.payment_code ?? null,
-        va_number: res.data.va_number ?? null,
-        expired_at: res.data.expired_at ?? null,
-        transaction_id: res.data.transaction_id,
+        method: pay.data.method ?? res.data.method ?? selectedMethod.code,
       });
 
       if (!merged.payment_id) {
@@ -86,8 +101,8 @@ export function BuyCoinPanel({ packages = [], onChanged }: Props) {
         transactionId: res.data.transaction_id,
         coin: res.data.coin,
         amount: res.data.amount,
-        method,
-        methodLabel: methodMeta?.label ?? method,
+        method: merged.method ?? selectedMethod.code,
+        methodLabel: selectedMethod.label,
         createdAt: Date.now(),
       });
 
@@ -137,23 +152,30 @@ export function BuyCoinPanel({ packages = [], onChanged }: Props) {
             </div>
           )}
 
-          <label className="block space-y-1.5">
-            <span className="text-xs text-white/50">Metode bayar</span>
-            <select className="field" value={method} onChange={(e) => setMethod(e.target.value)}>
-              {PAYMENT_METHODS.map((m) => (
-                <option key={m.code} value={m.code} className="bg-[#16121a]">
-                  {m.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          {methods.length === 0 ? (
+            <p className="text-sm text-white/45">
+              {channelsError ||
+                "Metode pembayaran belum tersedia. Pastikan channel PG aktif (GET /payment/channels)."}
+            </p>
+          ) : (
+            <label className="block space-y-1.5">
+              <span className="text-xs text-white/50">Metode bayar</span>
+              <select className="field" value={method} onChange={(e) => setMethod(e.target.value)}>
+                {methods.map((m) => (
+                  <option key={m.code} value={m.code} className="bg-[#16121a]">
+                    {m.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
           {error && <p className="text-sm text-rose-300">{error}</p>}
 
           <button
             type="button"
             className="btn-primary"
-            disabled={loading || !selected}
+            disabled={loading || !selected || !selectedMethod}
             onClick={() => void buy()}
           >
             {loading ? "Memproses..." : `Bayar ${selected?.label ?? "coin"}`}

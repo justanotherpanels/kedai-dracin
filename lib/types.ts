@@ -104,27 +104,48 @@ export type CoinPackage = {
   label?: string;
 };
 
+/** Channel aktif dari payment gateway (`GET /coin` / `GET /payment/channels`). */
+export type PaymentChannel = {
+  code: string;
+  name: string;
+  payment_type?: string | null;
+  icon_url?: string | null;
+  fee_customer?: number | { flat?: number; percent?: number } | null;
+  fee_merchant?: number | { flat?: number; percent?: number } | null;
+};
+
 export type CoinPayload = {
   coin: number;
   history: CoinHistory[];
   packages?: CoinPackage[];
+  payment_channels?: PaymentChannel[];
 };
 
-export type CoinPurchasePayload = {
+export type PaymentChannelsPayload = {
+  channels: PaymentChannel[];
+};
+
+/** Field bersama hasil POST /coin dan POST /payment (§4.2 / §6.2). */
+export type PaymentGatewayFields = {
+  method?: string | null;
+  payment_type?: string | null;
+  payment_url?: string | null;
+  qr_string?: string | null;
+  qr_content?: string | null;
+  qr_url?: string | null;
+  qr_image?: string | null;
+  va_number?: string | null;
+  payment_code?: string | null;
+  reference?: string;
+  gateway_reference?: string | null;
+  expired_at?: string | null;
+};
+
+export type CoinPurchasePayload = PaymentGatewayFields & {
   transaction_id: number;
   coin: number;
   amount: number;
   status: string;
-  payment_url?: string | null;
-  reference?: string;
-  /** Optional PG extras (backend may send these) */
-  qr_url?: string | null;
-  qr_image?: string | null;
-  qr_content?: string | null;
-  payment_code?: string | null;
-  va_number?: string | null;
-  method?: string | null;
-  expired_at?: string | null;
 };
 
 export type CoinCancelPayload = {
@@ -132,22 +153,13 @@ export type CoinCancelPayload = {
   status: string;
 };
 
-export type PaymentPayload = {
+export type PaymentPayload = PaymentGatewayFields & {
   payment_id: number;
   status: string;
-  payment_url?: string | null;
-  reference?: string;
   paid_at?: string | null;
   coin_balance?: number;
   amount?: number;
   coin?: number;
-  method?: string | null;
-  qr_url?: string | null;
-  qr_image?: string | null;
-  qr_content?: string | null;
-  payment_code?: string | null;
-  va_number?: string | null;
-  expired_at?: string | null;
   transaction_id?: number;
 };
 

@@ -50,7 +50,7 @@ async function forward(request: Request, pathParts: string[]) {
   let upstream = await fetch(target.toString(), init);
 
   if (upstream.status === 401 && !userAuth) {
-    clearGuestTokenCache();
+    await clearGuestTokenCache();
     try {
       const guest = await getGuestToken();
       headers.Authorization = `Bearer ${guest}`;

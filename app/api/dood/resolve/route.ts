@@ -8,13 +8,15 @@ export const maxDuration = 30;
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const url = (searchParams.get("url") ?? "").trim();
+  const bypassCache =
+    searchParams.get("fresh") === "1" || searchParams.get("nocache") === "1";
 
   if (!url) {
     return Response.json({ ok: false, error: "Parameter url wajib diisi." }, { status: 400 });
   }
 
   try {
-    const resolved = await resolveDoodStream(url);
+    const resolved = await resolveDoodStream(url, { bypassCache });
     const ticket = createStreamTicket(resolved.direct, resolved.referer);
     return Response.json(
       {

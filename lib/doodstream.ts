@@ -9,6 +9,7 @@ import {
   doodOrigin,
   extractDoodFileCode,
 } from "@/lib/dood-detect";
+import { redisGetJson, redisSetJson, RedisKeys } from "@/lib/redis";
 
 const execFileAsync = promisify(execFile);
 
@@ -33,6 +34,10 @@ function resolverUpstream(): string | null {
 function proxyUrl(): string | undefined {
   const raw = (process.env.DOOD_PROXY_URL || "").trim();
   return raw || undefined;
+}
+
+function resolveCacheTtl(): number {
+  return Number(process.env.DOOD_RESOLVE_CACHE_TTL || 120);
 }
 
 type HttpResult = {
@@ -454,29 +459,52 @@ async function resolveWithClient(
   throw lastError ?? new Error("Gagal resolve Doodstream");
 }
 
-export async function resolveDoodStream(inputUrl: string): Promise<ResolvedDood> {
+export async function resolveDoodStream(
+  inputUrl: string,
+  options: { bypassCache?: boolean } = {},
+): Promise<ResolvedDood> {
   const fileCode = extractDoodFileCode(inputUrl);
   if (!fileCode) {
     throw new Error("URL / file code Doodstream tidak valid");
   }
 
+  const cacheKey = RedisKeys.doodResolve(fileCode);
+  if (!options.bypassCache) {
+    const cached = await redisGetJson<ResolvedDood>(cacheKey);
+    if (cached?.direct && cached?.referer && cached?.fileCode) {
+      return cached;
+    }
+  }
+
+  let resolved: ResolvedDood;
+
   // 1) External resolver (VPS / PC / ngrok) — recommended on Vercel
   if (resolverUpstream()) {
     try {
       const upstream = await resolveViaUpstream(inputUrl);
-      if (upstream) return upstream;
+      if (upstream) {
+        resolved = upstream;
+      } else {
+        resolved = await resolveLocally(inputUrl, fileCode);
+      }
     } catch (err) {
-      // Fall through to local clients; keep upstream error if all fail
       const upstreamErr = err instanceof Error ? err : new Error(String(err));
       try {
-        return await resolveLocally(inputUrl, fileCode);
+        resolved = await resolveLocally(inputUrl, fileCode);
       } catch {
         throw upstreamErr;
       }
     }
+  } else {
+    resolved = await resolveLocally(inputUrl, fileCode);
   }
 
-  return resolveLocally(inputUrl, fileCode);
+  const ttl = resolveCacheTtl();
+  if (ttl > 0) {
+    await redisSetJson(cacheKey, resolved, ttl);
+  }
+
+  return resolved;
 }
 
 async function resolveLocally(inputUrl: string, fileCode: string): Promise<ResolvedDood> {

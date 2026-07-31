@@ -1,14 +1,16 @@
 import { API_BASE_URL } from "@/lib/config";
+import { redisDel, redisGetJson, redisSetJson, RedisKeys } from "@/lib/redis";
 
 const GUEST_EMAIL = process.env.GUEST_EMAIL || "guest.webapp@kedaidracin.com";
 const GUEST_PASSWORD = process.env.GUEST_PASSWORD || "GuestWebApp#2026";
+const GUEST_TTL_SECONDS = Number(process.env.GUEST_TOKEN_TTL || 60 * 30);
 
 type TokenCache = {
   token: string;
   expiresAt: number;
 };
 
-let cache: TokenCache | null = null;
+let memoryCache: TokenCache | null = null;
 let pending: Promise<string> | null = null;
 
 async function authRequest(path: string, body: Record<string, unknown>) {
@@ -36,8 +38,32 @@ async function authRequest(path: string, body: Record<string, unknown>) {
   return payload.data.token;
 }
 
+async function readCachedToken(): Promise<string | null> {
+  if (memoryCache && memoryCache.expiresAt > Date.now()) {
+    return memoryCache.token;
+  }
+
+  const fromRedis = await redisGetJson<TokenCache>(RedisKeys.guestToken);
+  if (fromRedis?.token && fromRedis.expiresAt > Date.now()) {
+    memoryCache = fromRedis;
+    return fromRedis.token;
+  }
+
+  return null;
+}
+
+async function writeCachedToken(token: string) {
+  const entry: TokenCache = {
+    token,
+    expiresAt: Date.now() + GUEST_TTL_SECONDS * 1000,
+  };
+  memoryCache = entry;
+  await redisSetJson(RedisKeys.guestToken, entry, GUEST_TTL_SECONDS);
+}
+
 export async function getGuestToken(): Promise<string> {
-  if (cache && cache.expiresAt > Date.now()) return cache.token;
+  const cached = await readCachedToken();
+  if (cached) return cached;
   if (pending) return pending;
 
   pending = (async () => {
@@ -50,9 +76,6 @@ export async function getGuestToken(): Promise<string> {
           device_name: "website",
         });
       } catch {
-        // Account may not exist yet — create then login.
-        // If email is taken with a different password, login will still fail;
-        // fix GUEST_EMAIL / GUEST_PASSWORD in .env.local.
         try {
           await authRequest("/auth/register", {
             name: "Guest Viewer",
@@ -61,7 +84,7 @@ export async function getGuestToken(): Promise<string> {
             password_confirmation: GUEST_PASSWORD,
           });
         } catch {
-          /* email may already exist — fall through to login */
+          /* email may already exist */
         }
 
         token = await authRequest("/auth/login", {
@@ -71,11 +94,7 @@ export async function getGuestToken(): Promise<string> {
         });
       }
 
-      cache = {
-        token,
-        // refresh periodically; sanctum tokens usually don't expire soon
-        expiresAt: Date.now() + 1000 * 60 * 30,
-      };
+      await writeCachedToken(token);
       return token;
     } finally {
       pending = null;
@@ -85,6 +104,7 @@ export async function getGuestToken(): Promise<string> {
   return pending;
 }
 
-export function clearGuestTokenCache() {
-  cache = null;
+export async function clearGuestTokenCache() {
+  memoryCache = null;
+  await redisDel(RedisKeys.guestToken);
 }

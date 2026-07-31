@@ -30,24 +30,17 @@ type ResolveResponse = {
   poster?: string | null;
 };
 
-async function resolvePlayableSrc(raw: string, signal: AbortSignal): Promise<{
+async function resolvePlayableSrc(raw: string): Promise<{
   playSrc: string;
   poster?: string | null;
 }> {
-  if (signal.aborted) {
-    throw new DOMException("Aborted", "AbortError");
-  }
-
   if (raw.includes(".m3u8") || raw.startsWith("/api/dood/stream")) {
     return { playSrc: raw };
   }
 
   if (isDoodSource(raw)) {
     const endpoint = `/api/dood/resolve?url=${encodeURIComponent(raw)}`;
-    const res = await fetch(endpoint, { signal, cache: "no-store" });
-    if (signal.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
+    const res = await fetch(endpoint, { cache: "no-store" });
     const data = (await res.json()) as ResolveResponse;
     if (!data.ok || !data.src) {
       throw new Error(data.error || "Gagal resolve Doodstream");
@@ -56,15 +49,6 @@ async function resolvePlayableSrc(raw: string, signal: AbortSignal): Promise<{
   }
 
   return { playSrc: raw };
-}
-
-function isAbortError(err: unknown) {
-  if (err == null) return false;
-  // abort("reason") can reject with the reason string itself (not AbortError)
-  if (typeof err === "string") return err === "cleanup" || err === "Aborted";
-  if (typeof err !== "object") return false;
-  const name = "name" in err ? String((err as { name: unknown }).name) : "";
-  return name === "AbortError";
 }
 
 export function VerticalPlayer({
@@ -115,7 +99,6 @@ export function VerticalPlayer({
 
     let hls: Hls | null = null;
     let cancelled = false;
-    const controller = new AbortController();
 
     setLoading(true);
     setError(null);
@@ -124,40 +107,52 @@ export function VerticalPlayer({
     setPlaying(true);
 
     const tryAutoPlay = async () => {
+      if (cancelled) return;
       try {
         video.muted = mutedRef.current;
         await video.play();
-        setPlaying(true);
+        if (!cancelled) setPlaying(true);
       } catch {
+        if (cancelled) return;
         try {
           video.muted = true;
           setMuted(true);
           mutedRef.current = true;
           await video.play();
-          setPlaying(true);
+          if (!cancelled) setPlaying(true);
         } catch {
-          setPlaying(false);
-          setShowUi(true);
+          if (!cancelled) {
+            setPlaying(false);
+            setShowUi(true);
+          }
         }
       }
     };
 
-    const onCanPlay = () => setLoading(false);
-    const onWaiting = () => setLoading(true);
+    const onCanPlay = () => {
+      if (!cancelled) setLoading(false);
+    };
+    const onWaiting = () => {
+      if (!cancelled) setLoading(true);
+    };
     const onPlaying = () => {
+      if (cancelled) return;
       setLoading(false);
       setPlaying(true);
     };
     const onPause = () => {
-      if (!video.ended) setPlaying(false);
+      if (!cancelled && !video.ended) setPlaying(false);
     };
     const onTime = () => {
+      if (cancelled) return;
       setProgress(video.currentTime);
       setDuration(video.duration || 0);
     };
-    const onErr = () => setError("Video gagal diputar.");
+    const onErr = () => {
+      if (!cancelled) setError("Video gagal diputar.");
+    };
     const onEnded = () => {
-      if (advancingRef.current) return;
+      if (cancelled || advancingRef.current) return;
       if (hasNextRef.current) {
         advancingRef.current = true;
         setLoading(true);
@@ -178,8 +173,8 @@ export function VerticalPlayer({
 
     const attach = async () => {
       try {
-        const { playSrc, poster: nextPoster } = await resolvePlayableSrc(src, controller.signal);
-        if (cancelled || controller.signal.aborted) return;
+        const { playSrc, poster: nextPoster } = await resolvePlayableSrc(src);
+        if (cancelled) return;
 
         if (nextPoster) {
           setPoster(nextPoster);
@@ -192,11 +187,11 @@ export function VerticalPlayer({
             hls.loadSource(playSrc);
             hls.attachMedia(video);
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              if (cancelled || controller.signal.aborted) return;
+              if (cancelled) return;
               void tryAutoPlay();
             });
             hls.on(Hls.Events.ERROR, (_, data) => {
-              if (cancelled || controller.signal.aborted) return;
+              if (cancelled) return;
               if (data.fatal) setError("Stream tidak tersedia.");
             });
           } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
@@ -210,27 +205,16 @@ export function VerticalPlayer({
           void tryAutoPlay();
         }
       } catch (err) {
-        if (cancelled || controller.signal.aborted || isAbortError(err)) return;
+        if (cancelled) return;
         setLoading(false);
         setError(err instanceof Error ? err.message : "Gagal memuat video.");
       }
     };
 
-    void attach().catch((err) => {
-      if (cancelled || controller.signal.aborted || isAbortError(err)) return;
-    });
+    void attach();
 
     return () => {
       cancelled = true;
-      try {
-        // Abort without a custom reason so fetch rejects as AbortError,
-        // not a string (e.g. "cleanup") that surfaces as a Next.js runtime error.
-        if (!controller.signal.aborted) {
-          controller.abort();
-        }
-      } catch {
-        /* ignore abort noise */
-      }
       video.removeEventListener("canplay", onCanPlay);
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);

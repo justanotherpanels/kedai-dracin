@@ -1,9 +1,11 @@
 "use client";
 
-import Hls from "hls.js";
-import { IconChevronLeft, IconPlayerPlayFilled, IconVolume, IconVolumeOff } from "@tabler/icons-react";
+import { IconChevronLeft } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import videojs from "video.js";
+import type Player from "video.js/dist/types/player";
 import { isDoodSource, toDoodEmbedUrl } from "@/lib/dood-detect";
+import "video.js/dist/video-js.css";
 
 type VerticalPlayerProps = {
   src: string;
@@ -32,13 +34,27 @@ type ResolveResponse = {
   embedUrl?: string | null;
 };
 
-async function resolvePlayableSrc(raw: string): Promise<{
+type ResolvedPlayable = {
   playSrc: string;
+  type: string;
   poster?: string | null;
   mode: "video" | "embed";
-}> {
-  if (raw.includes(".m3u8") || raw.startsWith("/api/dood/stream")) {
-    return { playSrc: raw, mode: "video" };
+};
+
+function inferMediaType(playSrc: string, resolvedType?: string): string {
+  if (resolvedType) return resolvedType;
+  if (playSrc.includes(".m3u8")) return "application/x-mpegURL";
+  if (playSrc.startsWith("/api/dood/stream")) return "video/mp4";
+  return "video/mp4";
+}
+
+async function resolvePlayableSrc(raw: string): Promise<ResolvedPlayable> {
+  if (raw.startsWith("/api/dood/stream")) {
+    return { playSrc: raw, type: "video/mp4", mode: "video" };
+  }
+
+  if (raw.includes(".m3u8")) {
+    return { playSrc: raw, type: "application/x-mpegURL", mode: "video" };
   }
 
   if (isDoodSource(raw)) {
@@ -47,23 +63,33 @@ async function resolvePlayableSrc(raw: string): Promise<{
       const res = await fetch(endpoint, { cache: "no-store" });
       const data = (await res.json()) as ResolveResponse;
       if (data.ok && data.src) {
-        return { playSrc: data.src, poster: data.poster, mode: "video" };
+        return {
+          playSrc: data.src,
+          type: inferMediaType(data.src, data.type),
+          poster: data.poster,
+          mode: "video",
+        };
       }
       const embedUrl = data.embedUrl || toDoodEmbedUrl(raw);
       if (embedUrl) {
-        return { playSrc: embedUrl, poster: data.poster, mode: "embed" };
+        return {
+          playSrc: embedUrl,
+          type: "video/mp4",
+          poster: data.poster,
+          mode: "embed",
+        };
       }
       throw new Error(data.error || "Gagal resolve Doodstream");
     } catch (err) {
       const embedUrl = toDoodEmbedUrl(raw);
       if (embedUrl) {
-        return { playSrc: embedUrl, mode: "embed" };
+        return { playSrc: embedUrl, type: "video/mp4", mode: "embed" };
       }
       throw err instanceof Error ? err : new Error("Gagal resolve Doodstream");
     }
   }
 
-  return { playSrc: raw, mode: "video" };
+  return { playSrc: raw, type: inferMediaType(raw), mode: "video" };
 }
 
 export function VerticalPlayer({
@@ -79,22 +105,20 @@ export function VerticalPlayer({
   allowSwipeNav = true,
   sideActions,
 }: VerticalPlayerProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const [playing, setPlaying] = useState(true);
-  const [muted, setMuted] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const mountRef = useRef<HTMLDivElement | null>(null);
+  const playerBoxRef = useRef<HTMLDivElement | null>(null);
+  const playerRef = useRef<Player | null>(null);
   const [showUi, setShowUi] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [poster, setPoster] = useState<string | undefined>();
   const [embedSrc, setEmbedSrc] = useState<string | null>(null);
   const hideTimer = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const onNextRef = useRef(onNext);
   const hasNextRef = useRef(hasNext);
   const advancingRef = useRef(false);
-  const mutedRef = useRef(muted);
+  const activeRef = useRef(active);
+  const playingRef = useRef(false);
 
   useEffect(() => {
     onNextRef.current = onNext;
@@ -102,198 +126,18 @@ export function VerticalPlayer({
   }, [onNext, hasNext]);
 
   useEffect(() => {
-    mutedRef.current = muted;
-  }, [muted]);
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     advancingRef.current = false;
   }, [src]);
 
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!src) return;
-
-    let hls: Hls | null = null;
-    let cancelled = false;
-
-    setLoading(true);
-    setError(null);
-    setProgress(0);
-    setPoster(undefined);
-    setEmbedSrc(null);
-    setPlaying(true);
-
-    const tryAutoPlay = async () => {
-      if (cancelled || !video) return;
-      try {
-        video.muted = mutedRef.current;
-        await video.play();
-        if (!cancelled) setPlaying(true);
-      } catch {
-        if (cancelled || !video) return;
-        try {
-          video.muted = true;
-          setMuted(true);
-          mutedRef.current = true;
-          await video.play();
-          if (!cancelled) setPlaying(true);
-        } catch {
-          if (!cancelled) {
-            setPlaying(false);
-            setShowUi(true);
-          }
-        }
-      }
-    };
-
-    const onCanPlay = () => {
-      if (!cancelled) setLoading(false);
-    };
-    const onWaiting = () => {
-      if (!cancelled) setLoading(true);
-    };
-    const onPlaying = () => {
-      if (cancelled) return;
-      setLoading(false);
-      setPlaying(true);
-    };
-    const onPause = () => {
-      if (!cancelled && video && !video.ended) setPlaying(false);
-    };
-    const onTime = () => {
-      if (cancelled || !video) return;
-      setProgress(video.currentTime);
-      setDuration(video.duration || 0);
-    };
-    const onErr = () => {
-      if (!cancelled) setError("Video gagal diputar.");
-    };
-    const onEnded = () => {
-      if (cancelled || advancingRef.current) return;
-      if (hasNextRef.current) {
-        advancingRef.current = true;
-        setLoading(true);
-        onNextRef.current?.();
-        return;
-      }
-      setPlaying(false);
-      setShowUi(true);
-    };
-
-    if (video) {
-      video.addEventListener("canplay", onCanPlay);
-      video.addEventListener("waiting", onWaiting);
-      video.addEventListener("playing", onPlaying);
-      video.addEventListener("pause", onPause);
-      video.addEventListener("timeupdate", onTime);
-      video.addEventListener("error", onErr);
-      video.addEventListener("ended", onEnded);
-    }
-
-    const attach = async () => {
-      try {
-        const { playSrc, poster: nextPoster, mode } = await resolvePlayableSrc(src);
-        if (cancelled) return;
-
-        if (nextPoster) {
-          setPoster(nextPoster);
-          if (video) video.poster = nextPoster;
-        }
-
-        if (mode === "embed") {
-          setEmbedSrc(playSrc);
-          setLoading(false);
-          setPlaying(true);
-          return;
-        }
-
-        if (!video) {
-          setError("Player tidak siap.");
-          return;
-        }
-
-        if (playSrc.includes(".m3u8")) {
-          if (Hls.isSupported()) {
-            hls = new Hls({ enableWorker: true, lowLatencyMode: true });
-            hls.loadSource(playSrc);
-            hls.attachMedia(video);
-            hls.on(Hls.Events.MANIFEST_PARSED, () => {
-              if (cancelled) return;
-              void tryAutoPlay();
-            });
-            hls.on(Hls.Events.ERROR, (_, data) => {
-              if (cancelled) return;
-              if (data.fatal) setError("Stream tidak tersedia.");
-            });
-          } else if (video.canPlayType("application/vnd.apple.mpegurl")) {
-            video.src = playSrc;
-            void tryAutoPlay();
-          } else {
-            setError("Browser tidak mendukung HLS.");
-          }
-        } else {
-          video.src = playSrc;
-          void tryAutoPlay();
-        }
-      } catch (err) {
-        if (cancelled) return;
-        setLoading(false);
-        setError(err instanceof Error ? err.message : "Gagal memuat video.");
-      }
-    };
-
-    void attach();
-
-    return () => {
-      cancelled = true;
-      if (video) {
-        video.removeEventListener("canplay", onCanPlay);
-        video.removeEventListener("waiting", onWaiting);
-        video.removeEventListener("playing", onPlaying);
-        video.removeEventListener("pause", onPause);
-        video.removeEventListener("timeupdate", onTime);
-        video.removeEventListener("error", onErr);
-        video.removeEventListener("ended", onEnded);
-      }
-      try {
-        hls?.destroy();
-      } catch {
-        /* ignore */
-      }
-      try {
-        if (video) {
-          video.pause();
-          video.removeAttribute("src");
-          video.load();
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [src]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || embedSrc) return;
-    if (!active) {
-      video.pause();
-      setPlaying(false);
-      return;
-    }
-    void video.play().catch(() => setPlaying(false));
-  }, [active, embedSrc]);
-
-  useEffect(() => {
-    const video = videoRef.current;
-    if (!video || embedSrc) return;
-    video.muted = muted;
-  }, [muted, embedSrc]);
-
   const bumpUi = () => {
     setShowUi(true);
     if (hideTimer.current) window.clearTimeout(hideTimer.current);
     hideTimer.current = window.setTimeout(() => {
-      if (playing) setShowUi(false);
+      if (playingRef.current) setShowUi(false);
     }, 2500);
   };
 
@@ -303,38 +147,207 @@ export function VerticalPlayer({
       if (hideTimer.current) window.clearTimeout(hideTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src, playing]);
+  }, [src]);
 
-  const togglePlay = () => {
-    if (embedSrc) return;
-    const video = videoRef.current;
-    if (!video) return;
-    if (video.paused) {
-      void video.play();
-    } else {
-      video.pause();
+  useEffect(() => {
+    if (!src) return;
+
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setEmbedSrc(null);
+    playingRef.current = false;
+
+    const disposePlayer = () => {
+      const player = playerRef.current;
+      playerRef.current = null;
+      if (player && !player.isDisposed()) {
+        try {
+          player.dispose();
+        } catch {
+          /* ignore */
+        }
+      }
+      if (mountRef.current) mountRef.current.innerHTML = "";
+    };
+
+    const fitPlayer = (player: Player) => {
+      const box = playerBoxRef.current;
+      if (!box) return;
+      const w = box.clientWidth || 360;
+      const h = box.clientHeight || 640;
+      player.dimensions(w, h);
+      player.trigger("resize");
+    };
+
+    const tryAutoPlay = async (player: Player) => {
+      if (cancelled || !activeRef.current) return;
+      try {
+        await player.play();
+        if (!cancelled) {
+          playingRef.current = true;
+          bumpUi();
+        }
+      } catch {
+        if (cancelled) return;
+        try {
+          player.muted(true);
+          await player.play();
+          if (!cancelled) {
+            playingRef.current = true;
+            bumpUi();
+          }
+        } catch {
+          if (!cancelled) {
+            playingRef.current = false;
+            setShowUi(true);
+          }
+        }
+      }
+    };
+
+    const createPlayer = (): Player | null => {
+      const mount = mountRef.current;
+      if (!mount) return null;
+
+      disposePlayer();
+
+      const videoEl = document.createElement("video");
+      videoEl.className = "video-js vjs-big-play-centered vjs-fill";
+      videoEl.setAttribute("playsinline", "true");
+      videoEl.setAttribute("preload", "auto");
+      mount.appendChild(videoEl);
+
+      const player = videojs(videoEl, {
+        controls: true,
+        fluid: false,
+        fill: true,
+        preload: "auto",
+        playsinline: true,
+        autoplay: false,
+        bigPlayButton: true,
+        controlBar: {
+          pictureInPictureToggle: false,
+        },
+        html5: {
+          vhs: { overrideNative: true },
+          nativeAudioTracks: false,
+          nativeVideoTracks: false,
+        },
+      });
+
+      player.addClass("vjs-vertical-player");
+
+      player.on("waiting", () => {
+        if (!cancelled) setLoading(true);
+      });
+      player.on("canplay", () => {
+        if (!cancelled) setLoading(false);
+      });
+      player.on("playing", () => {
+        if (cancelled) return;
+        setLoading(false);
+        playingRef.current = true;
+        bumpUi();
+      });
+      player.on("pause", () => {
+        if (cancelled || player.ended()) return;
+        playingRef.current = false;
+        setShowUi(true);
+      });
+      player.on("error", () => {
+        if (!cancelled) {
+          setLoading(false);
+          setError("Video gagal diputar.");
+        }
+      });
+      player.on("ended", () => {
+        if (cancelled || advancingRef.current) return;
+        if (hasNextRef.current) {
+          advancingRef.current = true;
+          setLoading(true);
+          onNextRef.current?.();
+          return;
+        }
+        playingRef.current = false;
+        setShowUi(true);
+      });
+
+      playerRef.current = player;
+      return player;
+    };
+
+    const attach = async () => {
+      try {
+        const resolved = await resolvePlayableSrc(src);
+        if (cancelled) return;
+
+        if (resolved.mode === "embed") {
+          disposePlayer();
+          setEmbedSrc(resolved.playSrc);
+          setLoading(false);
+          playingRef.current = true;
+          return;
+        }
+
+        const player = createPlayer();
+        if (!player) {
+          setError("Player tidak siap.");
+          setLoading(false);
+          return;
+        }
+
+        fitPlayer(player);
+        if (resolved.poster) player.poster(resolved.poster);
+        player.src({ src: resolved.playSrc, type: resolved.type });
+        await new Promise<void>((resolveReady) => {
+          player.ready(() => resolveReady());
+        });
+        if (cancelled) return;
+        fitPlayer(player);
+        requestAnimationFrame(() => fitPlayer(player));
+        setLoading(false);
+        await tryAutoPlay(player);
+      } catch (err) {
+        if (cancelled) return;
+        setLoading(false);
+        setError(err instanceof Error ? err.message : "Gagal memuat video.");
+      }
+    };
+
+    void attach();
+
+    const onResize = () => {
+      const player = playerRef.current;
+      if (player && !player.isDisposed()) fitPlayer(player);
+    };
+    window.addEventListener("resize", onResize);
+
+    return () => {
+      cancelled = true;
+      window.removeEventListener("resize", onResize);
+      disposePlayer();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src]);
+
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!player || player.isDisposed() || embedSrc) return;
+    if (!active) {
+      player.pause();
+      playingRef.current = false;
+      return;
     }
-    bumpUi();
-  };
-
-  const seek = (value: number) => {
-    const video = videoRef.current;
-    if (!video || embedSrc) return;
-    video.currentTime = value;
-    setProgress(value);
-  };
-
-  const format = (sec: number) => {
-    if (!Number.isFinite(sec)) return "0:00";
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60)
-      .toString()
-      .padStart(2, "0");
-    return `${m}:${s}`;
-  };
+    Promise.resolve(player.play()).catch(() => {
+      playingRef.current = false;
+      setShowUi(true);
+    });
+  }, [active, embedSrc]);
 
   return (
     <div
+      ref={playerBoxRef}
       className="relative h-full w-full bg-black"
       style={{ touchAction: allowSwipeNav ? "none" : "pan-y" }}
       onClick={bumpUi}
@@ -380,32 +393,13 @@ export function VerticalPlayer({
           referrerPolicy="origin"
         />
       ) : (
-        <video
-          ref={videoRef}
-          className="h-full w-full object-contain"
-          playsInline
-          autoPlay={active}
-          preload="auto"
-          poster={poster}
-          onDoubleClick={togglePlay}
-        />
-      )}
-
-      {!embedSrc && (
-        <button
-          type="button"
-          aria-label={playing ? "Pause" : "Play"}
-          className="absolute inset-0 z-10"
-          style={{ touchAction: allowSwipeNav ? "none" : "pan-y" }}
-          onClick={(e) => {
-            e.stopPropagation();
-            togglePlay();
-          }}
-        />
+        <div className="player-stage absolute inset-0">
+          <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+        </div>
       )}
 
       <div
-        className={`pointer-events-none absolute inset-0 z-20 bg-gradient-to-b from-black/55 via-transparent to-black/70 transition-opacity duration-300 ${
+        className={`pointer-events-none absolute inset-0 z-20 bg-gradient-to-b from-black/55 via-transparent to-transparent transition-opacity duration-300 ${
           showUi ? "opacity-100" : "opacity-0"
         }`}
       />
@@ -432,31 +426,10 @@ export function VerticalPlayer({
             <p className="truncate font-display text-base leading-tight">{title}</p>
             <p className="text-xs text-white/65">{episodeLabel}</p>
           </div>
-          {!embedSrc && (
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setMuted((m) => !m);
-                bumpUi();
-              }}
-              className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur"
-            >
-              {muted ? <IconVolumeOff size={20} stroke={1.8} /> : <IconVolume size={20} stroke={1.8} />}
-            </button>
-          )}
         </div>
       </div>
 
-      {!embedSrc && !playing && showUi && !loading && !error && (
-        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
-          <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/45 backdrop-blur">
-            <IconPlayerPlayFilled size={32} className="ml-0.5 text-white" />
-          </div>
-        </div>
-      )}
-
-      {loading && !error && (
+      {loading && !error && !embedSrc && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-[var(--accent)]" />
         </div>
@@ -475,11 +448,11 @@ export function VerticalPlayer({
       )}
 
       <div
-        className={`absolute inset-x-0 bottom-0 z-30 px-4 pb-[max(1.25rem,env(safe-area-inset-bottom))] transition-opacity duration-300 ${
+        className={`absolute inset-x-0 bottom-14 z-30 px-4 transition-opacity duration-300 ${
           showUi ? "opacity-100" : "opacity-0"
         }`}
       >
-        <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="mb-2 flex items-center justify-between gap-3">
           <button
             type="button"
             disabled={!hasPrev}
@@ -504,24 +477,6 @@ export function VerticalPlayer({
             Berikutnya
           </button>
         </div>
-
-        {!embedSrc && (
-          <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-            <input
-              type="range"
-              min={0}
-              max={duration || 0}
-              step={0.1}
-              value={progress}
-              onChange={(e) => seek(Number(e.target.value))}
-              className="player-seek w-full"
-            />
-            <div className="mt-1 flex justify-between text-[11px] text-white/55">
-              <span>{format(progress)}</span>
-              <span>{format(duration)}</span>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

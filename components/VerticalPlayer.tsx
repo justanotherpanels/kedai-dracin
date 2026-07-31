@@ -429,7 +429,7 @@ export function VerticalPlayer({
             </button>
           )}
           <div className="min-w-0 flex-1">
-            <p className="truncate font-[family-name:var(--font-display)] text-base leading-tight">{title}</p>
+            <p className="truncate font-display text-base leading-tight">{title}</p>
             <p className="text-xs text-white/65">{episodeLabel}</p>
           </div>
           {!embedSrc && (

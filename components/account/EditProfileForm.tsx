@@ -67,7 +67,7 @@ export function EditProfileForm({ onUpdated }: Props) {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between rounded-2xl bg-white/[0.03] px-4 py-3.5 text-left"
       >
-        <span className="font-[family-name:var(--font-display)] text-base">Edit profil</span>
+        <span className="font-display text-base">Edit profil</span>
         <span className="text-xs text-white/40">{open ? "Tutup" : "Ubah"}</span>
       </button>
 

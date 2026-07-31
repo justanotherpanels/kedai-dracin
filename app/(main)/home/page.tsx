@@ -202,7 +202,7 @@ export default function HomePage() {
 
             {!query && !providerId && trending.length > 0 && (
               <section>
-                <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg">Trending</h2>
+                <h2 className="mb-3 font-display text-lg">Trending</h2>
                 <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {trending.map((drama) => (
                     <DramaPoster key={`t-${drama.id}`} drama={drama} compact showLikes />
@@ -213,7 +213,7 @@ export default function HomePage() {
 
             {!query && !providerId && mostLiked.length > 0 && (
               <section>
-                <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg">Paling disukai</h2>
+                <h2 className="mb-3 font-display text-lg">Paling disukai</h2>
                 <div className="flex gap-3 overflow-x-auto pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {mostLiked.map((drama) => (
                     <DramaPoster key={`l-${drama.id}`} drama={drama} compact showLikes />
@@ -224,7 +224,7 @@ export default function HomePage() {
 
             <section>
               <div className="mb-3 flex items-baseline justify-between">
-                <h2 className="font-[family-name:var(--font-display)] text-lg">
+                <h2 className="font-display text-lg">
                   {query ? "Hasil pencarian" : "Drama populer"}
                 </h2>
                 <span className="text-xs text-white/40">{items.length} judul</span>

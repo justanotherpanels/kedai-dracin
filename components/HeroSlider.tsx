@@ -55,10 +55,10 @@ export function HeroSlider({ items }: { items: SliderItem[] }) {
         ))}
         <div className="absolute inset-0 bg-gradient-to-t from-[#0c0a0f] via-[#0c0a0f]/35 to-transparent" />
         <div className="absolute inset-x-0 bottom-0 space-y-3 p-5">
-          <p className="font-[family-name:var(--font-display)] text-[11px] uppercase tracking-[0.22em] text-[var(--accent)]">
+          <p className="font-display text-[11px] uppercase tracking-[0.22em] text-[var(--accent)]">
             Spotlight
           </p>
-          <h2 className="max-w-[18ch] font-[family-name:var(--font-display)] text-[1.65rem] leading-[1.05] tracking-tight">
+          <h2 className="max-w-[18ch] font-display text-[1.65rem] leading-[1.05] tracking-tight">
             {current.drama.title}
           </h2>
           <p className="text-sm text-white/65">{current.drama.total_episodes} episode</p>

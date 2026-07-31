@@ -47,13 +47,13 @@ export default function SavedPage() {
     return (
       <div className="page-scroll min-h-0 flex-1 px-4 pt-12">
         <header className="mb-5">
-          <p className="font-[family-name:var(--font-display)] text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
+          <p className="font-display text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
             Koleksi
           </p>
-          <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl">Tersimpan</h1>
+          <h1 className="mt-1 font-display text-2xl">Tersimpan</h1>
         </header>
         <div className="rounded-[1.4rem] border border-dashed border-white/10 px-6 py-16 text-center">
-          <p className="font-[family-name:var(--font-display)] text-lg">Masuk untuk menyimpan</p>
+          <p className="font-display text-lg">Masuk untuk menyimpan</p>
           <p className="mt-2 text-sm text-white/45">Simpan & like drama setelah login.</p>
           <Link href={loginUrl("/saved")} className="btn-primary mt-6 inline-flex max-w-xs">
             Masuk
@@ -66,10 +66,10 @@ export default function SavedPage() {
   return (
     <div className="page-scroll min-h-0 flex-1 px-4 pt-12">
       <header className="mb-5">
-        <p className="font-[family-name:var(--font-display)] text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
+        <p className="font-display text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
           Koleksi
         </p>
-        <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl">
+        <h1 className="mt-1 font-display text-2xl">
           {tab === "liked" ? "Disukai" : "Tersimpan"}
         </h1>
       </header>
@@ -105,7 +105,7 @@ export default function SavedPage() {
         </div>
       ) : items.length === 0 ? (
         <div className="rounded-[1.4rem] border border-dashed border-white/10 px-6 py-16 text-center">
-          <p className="font-[family-name:var(--font-display)] text-lg">Belum ada drama</p>
+          <p className="font-display text-lg">Belum ada drama</p>
           <p className="mt-2 text-sm text-white/45">
             {tab === "liked"
               ? "Like drama dari halaman detail."

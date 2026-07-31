@@ -41,14 +41,6 @@ function LoginForm() {
     <div className="page-scroll flex flex-1 flex-col px-6 pb-10 pt-16">
       <div className="fade-up mb-10">
         <BrandLogo priority className="mb-5" />
-        <h1 className="mt-3 font-[family-name:var(--font-display)] text-[2.35rem] leading-[1.05] tracking-tight">
-          Masuk untuk
-          <br />
-          episode VIP.
-        </h1>
-        <p className="mt-3 max-w-[28ch] text-sm leading-relaxed text-white/55">
-          Episode gratis bisa ditonton tanpa akun. Login diperlukan untuk VIP, simpan, dan coin.
-        </p>
       </div>
 
       <form onSubmit={onSubmit} className="fade-up space-y-3" style={{ animationDelay: "80ms" }}>

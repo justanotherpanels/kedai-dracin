@@ -42,7 +42,7 @@ export function DeleteAccountPanel() {
         onClick={() => setOpen((v) => !v)}
         className="flex w-full items-center justify-between rounded-2xl bg-rose-500/5 px-4 py-3.5 text-left"
       >
-        <span className="font-[family-name:var(--font-display)] text-base text-rose-200">Hapus akun</span>
+        <span className="font-display text-base text-rose-200">Hapus akun</span>
         <span className="text-xs text-white/40">{open ? "Tutup" : "Buka"}</span>
       </button>
 

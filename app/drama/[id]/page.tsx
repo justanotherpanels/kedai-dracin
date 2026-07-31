@@ -238,7 +238,7 @@ function DramaDetailContent() {
 
         <div className="absolute inset-x-0 bottom-0 space-y-2 p-5">
           <p className="text-xs uppercase tracking-[0.2em] text-[var(--accent)]">Drama</p>
-          <h1 className="font-[family-name:var(--font-display)] text-[1.85rem] leading-tight">
+          <h1 className="font-display text-[1.85rem] leading-tight">
             {data?.drama.title ?? "Memuat..."}
           </h1>
           <p className="text-sm text-white/60">
@@ -269,7 +269,7 @@ function DramaDetailContent() {
         )}
 
         <div className="mb-3 flex items-baseline justify-between">
-          <h2 className="font-[family-name:var(--font-display)] text-lg">Daftar episode</h2>
+          <h2 className="font-display text-lg">Daftar episode</h2>
           {token ? (
             <Link href="/profile" className="text-xs text-[var(--accent-soft)]">
               {user?.coin ?? 0} coin

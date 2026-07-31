@@ -34,12 +34,6 @@ export default function ForgotPasswordPage() {
       <div className="page-scroll flex flex-1 flex-col px-6 pb-10 pt-16">
         <div className="fade-up mb-8">
           <BrandLogo priority className="mb-5" />
-          <h1 className="mt-3 font-[family-name:var(--font-display)] text-[2.2rem] leading-[1.05]">
-            Lupa password
-          </h1>
-          <p className="mt-3 text-sm text-white/55">
-            Masukkan email akun. Kami kirim link untuk reset password.
-          </p>
         </div>
 
         <form onSubmit={onSubmit} className="fade-up space-y-3" style={{ animationDelay: "80ms" }}>

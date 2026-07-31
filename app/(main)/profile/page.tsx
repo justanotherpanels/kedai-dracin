@@ -67,10 +67,10 @@ export default function ProfilePage() {
     return (
       <div className="page-scroll min-h-0 flex-1 px-4 pt-12">
         <header className="mb-6">
-          <p className="font-[family-name:var(--font-display)] text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
+          <p className="font-display text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
             Akun
           </p>
-          <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl">Guest</h1>
+          <h1 className="mt-1 font-display text-2xl">Guest</h1>
           <p className="mt-1 text-sm text-white/50">Masuk untuk coin, VIP, dan pengaturan akun.</p>
         </header>
         <Link href={loginUrl("/profile")} className="btn-primary">
@@ -83,16 +83,16 @@ export default function ProfilePage() {
   return (
     <div className="page-scroll min-h-0 flex-1 px-4 pt-12">
       <header className="mb-6">
-        <p className="font-[family-name:var(--font-display)] text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
+        <p className="font-display text-[11px] uppercase tracking-[0.24em] text-[var(--accent)]">
           Akun
         </p>
-        <h1 className="mt-1 font-[family-name:var(--font-display)] text-2xl">{user?.name}</h1>
+        <h1 className="mt-1 font-display text-2xl">{user?.name}</h1>
         <p className="mt-1 text-sm text-white/50">{user?.email}</p>
       </header>
 
       <section className="fade-up mb-5 overflow-hidden rounded-[1.5rem] bg-gradient-to-br from-[#2a1620] via-[#16121a] to-[#0f0c12] p-5">
         <p className="text-xs uppercase tracking-[0.18em] text-white/45">Saldo coin</p>
-        <p className="mt-2 font-[family-name:var(--font-display)] text-4xl text-[var(--accent-soft)]">
+        <p className="mt-2 font-display text-4xl text-[var(--accent-soft)]">
           {coinData?.coin ?? user?.coin ?? 0}
         </p>
       </section>
@@ -105,7 +105,7 @@ export default function ProfilePage() {
       <EditProfileForm onUpdated={() => void load()} />
 
       <section className="mb-6">
-        <h2 className="mb-3 font-[family-name:var(--font-display)] text-lg">Riwayat coin</h2>
+        <h2 className="mb-3 font-display text-lg">Riwayat coin</h2>
         {loading ? (
           <div className="flex justify-center py-10">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/15 border-t-[var(--accent)]" />

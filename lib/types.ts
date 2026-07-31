@@ -117,6 +117,14 @@ export type CoinPurchasePayload = {
   status: string;
   payment_url?: string | null;
   reference?: string;
+  /** Optional PG extras (backend may send these) */
+  qr_url?: string | null;
+  qr_image?: string | null;
+  qr_content?: string | null;
+  payment_code?: string | null;
+  va_number?: string | null;
+  method?: string | null;
+  expired_at?: string | null;
 };
 
 export type CoinCancelPayload = {
@@ -131,6 +139,16 @@ export type PaymentPayload = {
   reference?: string;
   paid_at?: string | null;
   coin_balance?: number;
+  amount?: number;
+  coin?: number;
+  method?: string | null;
+  qr_url?: string | null;
+  qr_image?: string | null;
+  qr_content?: string | null;
+  payment_code?: string | null;
+  va_number?: string | null;
+  expired_at?: string | null;
+  transaction_id?: number;
 };
 
 export type LikePayload = {

@@ -19,8 +19,30 @@ const DOOD_HOSTS = [
   "dooood.com",
   "doodcdn.com",
   "d000d.com",
+  "d0000d.com",
   "dood.video",
+  // Active Cloudflare mirrors (redirect targets)
+  "playmogo.com",
+  "alltimesplay.com",
+  "vidply.com",
 ];
+
+/** Preferred bootstrap hosts when resolving / retrying past Cloudflare. */
+export const DOOD_BOOTSTRAP_ORIGINS = [
+  "https://dsvplay.com",
+  "https://doodstream.com",
+  "https://dood.li",
+  "https://dooood.com",
+  "https://playmogo.com",
+] as const;
+
+function isDoodHost(host: string): boolean {
+  const h = host.toLowerCase();
+  if (DOOD_HOSTS.some((allowed) => h === allowed || h.endsWith(`.${allowed}`))) {
+    return true;
+  }
+  return /dood|ds2play|ds2video|dsvplay|playmogo|d0000?d/i.test(h);
+}
 
 export function extractDoodFileCode(input: string): string | null {
   const raw = input.trim();
@@ -37,12 +59,7 @@ export function extractDoodFileCode(input: string): string | null {
     return null;
   }
 
-  const host = parts.hostname.toLowerCase();
-  const isDood =
-    DOOD_HOSTS.some((allowed) => host === allowed || host.endsWith(`.${allowed}`)) ||
-    /dood|ds2play|ds2video|dsvplay/i.test(host);
-
-  if (!isDood) return null;
+  if (!isDoodHost(parts.hostname)) return null;
 
   const path = parts.pathname;
   const nested = path.match(/\/(?:e|d|play|f)\/([a-zA-Z0-9]+)/);

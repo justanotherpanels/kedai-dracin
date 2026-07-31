@@ -162,9 +162,14 @@ function DramaDetailContent() {
       }
       router.push(`/watch/${dramaId}/${ep.episode}`);
     } catch (err) {
-      if (err instanceof ApiRequestError && (err.status === 401 || err.status === 403)) {
-        if (!token) {
+      if (err instanceof ApiRequestError) {
+        if (err.code === "login_required" || ((err.status === 401 || err.status === 403) && !token)) {
           requireLogin(`/watch/${dramaId}/${ep.episode}`);
+          return;
+        }
+        if (err.code === "insufficient_coin") {
+          const required = typeof err.data?.required === "number" ? err.data.required : ep.coin_cost;
+          setError(err.message || `Coin tidak cukup. Butuh ${required} coin.`);
           return;
         }
       }

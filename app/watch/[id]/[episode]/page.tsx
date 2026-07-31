@@ -152,20 +152,22 @@ function WatchContent() {
           setUser({ ...user, coin: res.data.coin_balance });
         }
       } catch (err) {
-        if (
-          err instanceof ApiRequestError &&
-          (err.status === 401 || err.status === 403) &&
-          !token
-        ) {
-          setPlayErrors((prev) => ({
-            ...prev,
-            [ep.episode]: "Episode VIP / premium — masuk untuk melanjutkan.",
-          }));
+        if (err instanceof ApiRequestError) {
+          if (err.code === "login_required" || ((err.status === 401 || err.status === 403) && !token)) {
+            setPlayErrors((prev) => ({
+              ...prev,
+              [ep.episode]: err.message || "Episode VIP — masuk untuk menonton.",
+            }));
+          } else {
+            setPlayErrors((prev) => ({
+              ...prev,
+              [ep.episode]: err.message || "Gagal memutar episode.",
+            }));
+          }
         } else {
           setPlayErrors((prev) => ({
             ...prev,
-            [ep.episode]:
-              err instanceof ApiRequestError ? err.message : "Gagal memutar episode.",
+            [ep.episode]: "Gagal memutar episode.",
           }));
         }
       } finally {

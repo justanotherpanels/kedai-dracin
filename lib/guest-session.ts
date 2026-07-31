@@ -1,6 +1,6 @@
 import { API_BASE_URL } from "@/lib/config";
 
-const GUEST_EMAIL = process.env.GUEST_EMAIL || "guest.web@kedaidracin.com";
+const GUEST_EMAIL = process.env.GUEST_EMAIL || "guest.webapp@kedaidracin.com";
 const GUEST_PASSWORD = process.env.GUEST_PASSWORD || "GuestWebApp#2026";
 
 type TokenCache = {
@@ -47,20 +47,27 @@ export async function getGuestToken(): Promise<string> {
         token = await authRequest("/auth/login", {
           email: GUEST_EMAIL,
           password: GUEST_PASSWORD,
-        device_name: "website",
+          device_name: "website",
         });
       } catch {
-        await authRequest("/auth/register", {
-          name: "Guest Viewer",
-          email: GUEST_EMAIL,
-          password: GUEST_PASSWORD,
-          password_confirmation: GUEST_PASSWORD,
-        }).catch(() => null);
+        // Account may not exist yet — create then login.
+        // If email is taken with a different password, login will still fail;
+        // fix GUEST_EMAIL / GUEST_PASSWORD in .env.local.
+        try {
+          await authRequest("/auth/register", {
+            name: "Guest Viewer",
+            email: GUEST_EMAIL,
+            password: GUEST_PASSWORD,
+            password_confirmation: GUEST_PASSWORD,
+          });
+        } catch {
+          /* email may already exist — fall through to login */
+        }
 
         token = await authRequest("/auth/login", {
           email: GUEST_EMAIL,
           password: GUEST_PASSWORD,
-        device_name: "website",
+          device_name: "website",
         });
       }
 

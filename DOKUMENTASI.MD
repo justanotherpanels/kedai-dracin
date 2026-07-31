@@ -530,10 +530,10 @@ Urutan berdasarkan aktivitas play / unlock terbaru (fallback: likes + total epis
 
 Aturan bisnis (sama mobile):
 
-| Episode | Akses | Biaya |
-|---|---|---|
-| 1 – 20 | Free play | 0 coin |
-| 21+ | Berbayar | **5 coin / episode** |
+| Episode | Akses | Biaya | Login |
+|---|---|---|---|
+| 1 – 20 | Free play | 0 coin | Tidak wajib |
+| 21+ | Berbayar (VIP) | **5 coin / episode** | **Wajib** |
 
 Config: `MOBILE_FREE_EPISODES`, `MOBILE_COIN_PER_EPISODE` (atau alias `WEBSITE_*` jika nanti dipisah).
 
@@ -541,7 +541,7 @@ Config: `MOBILE_FREE_EPISODES`, `MOBILE_COIN_PER_EPISODE` (atau alias `WEBSITE_*
 
 `POST /api/v2/play/drama/{id_drama}/episode/{episode_number}`
 
-Bearer token **wajib**.
+Bearer **opsional** untuk episode Free; **wajib** untuk episode VIP.
 
 **Body (JSON, opsional)**
 
@@ -551,11 +551,12 @@ Bearer token **wajib**.
 
 **Logic**
 
-1. Episode `<= 20` → beri `stream_url`, coin tidak berkurang.
-2. Episode `> 20`:
+1. Episode `<= 20` (Free) → boleh play **tanpa login**, beri `stream_url`, coin tidak berkurang. `coin_balance` = `0` jika guest.
+2. Episode `> 20` (VIP) **tanpa Bearer** → `401` `login_required`.
+3. Episode `> 20` (VIP) **dengan Bearer**:
    - sudah di-unlock → `stream_url` tanpa potong coin lagi.
    - belum → cek saldo `>= 5`, potong **5 coin**, catat unlock, beri `stream_url`.
-3. Coin tidak cukup → `403` `insufficient_coin`.
+4. Coin tidak cukup → `403` `insufficient_coin`.
 
 **`stream_url` website** = URL mentah dari `video_dramas.url` (tanpa token/proxy membership).
 
@@ -577,6 +578,16 @@ Bearer token **wajib**.
     "coin_balance": 20,
     "subtitles": []
   }
+}
+```
+
+**Response 401 (VIP tanpa login)**
+
+```json
+{
+  "status": "error",
+  "message": "Episode VIP memerlukan login.",
+  "code": "login_required"
 }
 ```
 
@@ -780,7 +791,7 @@ Bearer token wajib.
 | Play | GET | `/play/drama` | publik* |
 | Play | GET | `/play/drama/{id}/episode` | publik* |
 | Play | GET | `/play/trending` | publik |
-| Free Play | POST | `/play/drama/{id}/episode/{episode_number}` | Bearer |
+| Free Play | POST | `/play/drama/{id}/episode/{episode_number}` | Free: publik; VIP: Bearer |
 | Drama | GET | `/drama` | publik* |
 | Drama | GET | `/drama/{id}` | publik* (id atau slug) |
 | Drama | GET | `/drama/most-liked` | publik* |
@@ -816,6 +827,6 @@ Bearer token wajib.
 - Coin, PG, unlock episode, slider, saved drama: **reuse** service/tabel mobile yang sudah ada.
 - `stream_url` website = **URL mentah** `video_dramas.url` (sama kebijakan mobile, beda dari API membership tokenized).
 - Field `slug` selalu ada di objek drama (list/detail/trending/dashboard/play episode) dan di response play (`slug`, `drama_id`).
-- Free play: **20 episode gratis**, lanjut **5 coin / episode**.
+- Free play: **20 episode gratis** (boleh tanpa login), lanjut **5 coin / episode** (VIP wajib login).
 - Fitur baru khusus website: **trending**, **most-liked**, **like/unlike**.
-- Status dokumen: **implemented** — endpoint `/api/v2` di `routes/api.php` (auth Sanctum, optional auth untuk katalog publik).
+- Status dokumen: **implemented** — endpoint `/api/v2` di `routes/api.php` (auth Sanctum, optional auth untuk katalog publik + free play).

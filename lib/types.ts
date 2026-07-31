@@ -74,6 +74,8 @@ export type EpisodeListPayload = {
 
 export type PlayPayload = {
   drama: string;
+  drama_id?: number;
+  slug?: string;
   episode: number;
   episode_name: string;
   type: string;

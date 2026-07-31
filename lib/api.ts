@@ -6,8 +6,6 @@ type RequestOptions = {
   body?: unknown;
   token?: string | null;
   query?: Record<string, string | number | undefined | null>;
-  /** Force guest proxy (for play without user login) */
-  useGuestProxy?: boolean;
 };
 
 export class ApiRequestError extends Error {
@@ -24,24 +22,9 @@ export class ApiRequestError extends Error {
   }
 }
 
-function buildUrl(
-  path: string,
-  query?: RequestOptions["query"],
-  useGuestProxy?: boolean,
-) {
+function buildUrl(path: string, query?: RequestOptions["query"]) {
   const normalized = path.replace(/^\//, "");
-  const needsProxy =
-    useGuestProxy ||
-    (typeof window !== "undefined" &&
-      !useGuestProxy &&
-      // play unlock without going through browser CORS + inject guest when needed
-      false);
-
-  const base =
-    typeof window !== "undefined" && (useGuestProxy || needsProxy)
-      ? `${window.location.origin}/api/proxy/`
-      : `${API_BASE_URL.replace(/\/$/, "")}/`;
-
+  const base = `${API_BASE_URL.replace(/\/$/, "")}/`;
   const url = new URL(normalized, base);
   if (query) {
     for (const [key, value] of Object.entries(query)) {
@@ -65,20 +48,11 @@ export async function apiRequest<T>(
     headers["Content-Type"] = "application/json";
   }
 
-  // Play tanpa login: pakai proxy agar server inject guest token
-  const isPlayUnlock =
-    /^\/?play\/drama\/\d+\/episode\/\d+$/i.test(path.replace(/^\//, "")) &&
-    (options.method ?? (options.body !== undefined ? "POST" : "GET")).toUpperCase() === "POST";
-
-  const useGuestProxy =
-    options.useGuestProxy ||
-    (typeof window !== "undefined" && isPlayUnlock && !options.token);
-
   if (options.token) {
     headers.Authorization = `Bearer ${options.token}`;
   }
 
-  const response = await fetch(buildUrl(path, options.query, useGuestProxy), {
+  const response = await fetch(buildUrl(path, options.query), {
     method: options.method ?? (options.body !== undefined ? "POST" : "GET"),
     headers,
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,

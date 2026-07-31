@@ -15,8 +15,17 @@ async function forward(request: Request, pathParts: string[]) {
   let bearer = userAuth;
 
   if (!bearer) {
-    const guest = await getGuestToken();
-    bearer = `Bearer ${guest}`;
+    try {
+      const guest = await getGuestToken();
+      bearer = `Bearer ${guest}`;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Guest session gagal. Coba login.";
+      return Response.json(
+        { status: "error", message },
+        { status: 401, headers: { "cache-control": "no-store" } },
+      );
+    }
   }
 
   const headers: Record<string, string> = {
@@ -42,9 +51,18 @@ async function forward(request: Request, pathParts: string[]) {
 
   if (upstream.status === 401 && !userAuth) {
     clearGuestTokenCache();
-    const guest = await getGuestToken();
-    headers.Authorization = `Bearer ${guest}`;
-    upstream = await fetch(target.toString(), { ...init, headers });
+    try {
+      const guest = await getGuestToken();
+      headers.Authorization = `Bearer ${guest}`;
+      upstream = await fetch(target.toString(), { ...init, headers });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Guest session gagal. Coba login.";
+      return Response.json(
+        { status: "error", message },
+        { status: 401, headers: { "cache-control": "no-store" } },
+      );
+    }
   }
 
   const body = await upstream.arrayBuffer();

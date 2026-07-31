@@ -101,11 +101,11 @@ function DramaFeed() {
         }
       } catch (err) {
         const message =
-          err instanceof ApiRequestError && (err.status === 401 || err.status === 403) && !token
-            ? "Masuk untuk menonton drama ini."
-            : err instanceof ApiRequestError
-              ? err.message
-              : "Gagal memutar drama.";
+          err instanceof ApiRequestError
+            ? err.code === "login_required" || ((err.status === 401 || err.status === 403) && !token)
+              ? err.message || "Masuk untuk menonton drama ini."
+              : err.message
+            : "Gagal memutar drama.";
         setPlayErrors((prev) => ({ ...prev, [drama.id]: message }));
       } finally {
         loadingIdsRef.current = { ...loadingIdsRef.current, [drama.id]: false };

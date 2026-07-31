@@ -5,14 +5,17 @@ import { useParams, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
 import { MobileShell } from "@/components/MobileShell";
+import { PaymentQr } from "@/components/PaymentQr";
 import { apiRequest, ApiRequestError } from "@/lib/api";
 import { loginUrl } from "@/lib/auth-redirect";
-import { PAYMENT_METHODS } from "@/lib/coin-packages";
+import { getPaymentMethod, getPaymentMethodKind, PAYMENT_METHODS } from "@/lib/coin-packages";
 import {
   clearPaymentSession,
   loadPaymentSession,
+  normalizePaymentPayload,
   resolvePaymentCode,
-  resolveQrImageSrc,
+  resolveQrPayload,
+  resolveVaNumber,
   savePaymentSession,
   type PaymentCheckoutSession,
 } from "@/lib/payment-session";
@@ -45,16 +48,27 @@ export default function PaymentCheckoutPage() {
     }
   }, [ready, token, router, paymentId]);
 
-  const qrSrc = useMemo(
-    () => (session ? resolveQrImageSrc(session.payment) : null),
+  const methodKind = useMemo(
+    () => getPaymentMethodKind(session?.method ?? session?.payment.method),
     [session],
   );
+  const isVa = methodKind === "va";
+
+  const hasQrSource = useMemo(
+    () => (session && !isVa ? Boolean(resolveQrPayload(session.payment, { allowPaymentUrl: true })) : false),
+    [session, isVa],
+  );
+  const vaNumber = useMemo(
+    () => (session && isVa ? resolveVaNumber(session.payment) : null),
+    [session, isVa],
+  );
   const payCode = useMemo(
-    () => (session ? resolvePaymentCode(session.payment) : null),
-    [session],
+    () => (session ? (isVa ? resolveVaNumber(session.payment) : resolvePaymentCode(session.payment)) : null),
+    [session, isVa],
   );
   const methodLabel =
     session?.methodLabel ||
+    getPaymentMethod(session?.method)?.label ||
     PAYMENT_METHODS.find((m) => m.code === session?.method)?.label ||
     session?.method ||
     "Pembayaran";
@@ -70,6 +84,14 @@ export default function PaymentCheckoutPage() {
     }
   };
 
+  const applyPaymentUpdate = useCallback(
+    (prev: PaymentCheckoutSession, data: PaymentPayload): PaymentCheckoutSession => {
+      const nextPayment = normalizePaymentPayload(data, prev.payment);
+      return { ...prev, payment: nextPayment };
+    },
+    [],
+  );
+
   const syncPayment = useCallback(async () => {
     if (!token || !session) return;
     setLoading(true);
@@ -79,11 +101,7 @@ export default function PaymentCheckoutPage() {
         `/payment/${session.payment.payment_id}/update`,
         { method: "POST", token },
       );
-      const nextPayment = { ...session.payment, ...res.data };
-      const nextSession: PaymentCheckoutSession = {
-        ...session,
-        payment: nextPayment,
-      };
+      const nextSession = applyPaymentUpdate(session, res.data);
       setSession(nextSession);
       savePaymentSession(nextSession);
 
@@ -102,7 +120,7 @@ export default function PaymentCheckoutPage() {
     } finally {
       setLoading(false);
     }
-  }, [token, session, user, setUser, router]);
+  }, [token, session, user, setUser, router, applyPaymentUpdate]);
 
   const sessionStatus = session?.payment.status;
   const sessionPaymentId = session?.payment.payment_id;
@@ -119,10 +137,7 @@ export default function PaymentCheckoutPage() {
           });
           setSession((prev) => {
             if (!prev) return prev;
-            const next: PaymentCheckoutSession = {
-              ...prev,
-              payment: { ...prev.payment, ...res.data },
-            };
+            const next = applyPaymentUpdate(prev, res.data);
             savePaymentSession(next);
             return next;
           });
@@ -140,7 +155,7 @@ export default function PaymentCheckoutPage() {
       })();
     }, 12_000);
     return () => window.clearInterval(timer);
-  }, [token, sessionPaymentId, sessionStatus, user, setUser, router]);
+  }, [token, sessionPaymentId, sessionStatus, user, setUser, router, applyPaymentUpdate]);
 
   const cancelPayment = async () => {
     if (!token || !session) return;
@@ -200,51 +215,85 @@ export default function PaymentCheckoutPage() {
             </section>
 
             <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-5">
-              <p className="mb-4 text-center text-sm text-white/60">
-                Scan QR QRIS di bawah, atau salin kode bayar
-              </p>
-
-              <div className="mx-auto flex h-[280px] w-[280px] items-center justify-center overflow-hidden rounded-2xl bg-white p-3">
-                {qrSrc ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={qrSrc}
-                    alt="QRIS pembayaran"
-                    width={256}
-                    height={256}
-                    className="h-full w-full object-contain"
-                  />
-                ) : (
-                  <div className="px-4 text-center text-sm text-[#1a0b10]/70">
-                    QR belum tersedia dari gateway.
-                    {session.payment.payment_url ? " Gunakan tombol buka pembayaran." : ""}
-                  </div>
-                )}
-              </div>
-
-              {payCode && (
-                <div className="mt-5 rounded-xl bg-black/25 px-4 py-3">
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-white/40">
-                    Kode bayar
+              {isVa ? (
+                <>
+                  <p className="mb-4 text-center text-sm text-white/60">
+                    Transfer ke Virtual Account di bawah ini
                   </p>
-                  <div className="mt-2 flex items-center gap-2">
-                    <p className="min-w-0 flex-1 break-all font-mono text-sm font-semibold tracking-wide text-white">
-                      {payCode}
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => void copyCode()}
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10"
-                      aria-label="Salin kode"
-                    >
-                      {copied ? (
-                        <IconCheck size={18} className="text-emerald-300" />
-                      ) : (
-                        <IconCopy size={18} />
-                      )}
-                    </button>
+                  {vaNumber || payCode ? (
+                    <div className="rounded-xl bg-black/25 px-4 py-5">
+                      <p className="text-center text-[11px] uppercase tracking-[0.14em] text-white/40">
+                        Nomor Virtual Account
+                      </p>
+                      <div className="mt-3 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 break-all text-center font-mono text-xl font-semibold tracking-wide text-white">
+                          {vaNumber || payCode}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void copyCode()}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10"
+                          aria-label="Salin nomor VA"
+                        >
+                          {copied ? (
+                            <IconCheck size={18} className="text-emerald-300" />
+                          ) : (
+                            <IconCopy size={18} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl bg-black/25 px-4 py-6 text-center text-sm text-white/55">
+                      Nomor VA belum tersedia dari gateway.
+                      {session.payment.payment_url ? " Gunakan tombol buka pembayaran." : ""}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  <p className="mb-4 text-center text-sm text-white/60">
+                    {methodKind === "qris"
+                      ? "Scan QR QRIS di bawah untuk membayar"
+                      : `Bayar via ${methodLabel} — scan QR atau buka halaman bayar`}
+                  </p>
+
+                  <div className="mx-auto flex h-[280px] w-[280px] items-center justify-center overflow-hidden rounded-2xl bg-white p-3">
+                    {hasQrSource ? (
+                      <PaymentQr payment={session.payment} allowPaymentUrl />
+                    ) : (
+                      <div className="px-4 text-center text-sm text-[#1a0b10]/70">
+                        QR belum tersedia dari gateway.
+                        {session.payment.payment_url ? " Gunakan tombol buka pembayaran." : ""}
+                      </div>
+                    )}
                   </div>
-                </div>
+
+                  {payCode && !hasQrSource && (
+                    <div className="mt-5 rounded-xl bg-black/25 px-4 py-3">
+                      <p className="text-[11px] uppercase tracking-[0.14em] text-white/40">
+                        Kode bayar
+                      </p>
+                      <div className="mt-2 flex items-center gap-2">
+                        <p className="min-w-0 flex-1 break-all font-mono text-sm font-semibold tracking-wide text-white">
+                          {payCode}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => void copyCode()}
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10"
+                          aria-label="Salin kode"
+                        >
+                          {copied ? (
+                            <IconCheck size={18} className="text-emerald-300" />
+                          ) : (
+                            <IconCopy size={18} />
+                          )}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
 
               {session.payment.expired_at && (
@@ -274,7 +323,7 @@ export default function PaymentCheckoutPage() {
                 {loading ? "Memeriksa..." : "Cek status pembayaran"}
               </button>
 
-              {session.payment.payment_url && !qrSrc && (
+              {session.payment.payment_url && (
                 <a
                   href={session.payment.payment_url}
                   target="_blank"

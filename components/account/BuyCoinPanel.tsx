@@ -3,9 +3,9 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/AuthProvider";
-import { PAYMENT_METHODS } from "@/lib/coin-packages";
+import { getPaymentMethod, PAYMENT_METHODS } from "@/lib/coin-packages";
 import { apiRequest, ApiRequestError } from "@/lib/api";
-import { savePaymentSession } from "@/lib/payment-session";
+import { normalizePaymentPayload, savePaymentSession } from "@/lib/payment-session";
 import type { CoinPackage, CoinPurchasePayload, PaymentPayload } from "@/lib/types";
 
 type Props = {
@@ -40,6 +40,7 @@ export function BuyCoinPanel({ packages = [], onChanged }: Props) {
     setLoading(true);
     setError(null);
     try {
+      // §4.2 Add Coin — buat invoice
       const res = await apiRequest<CoinPurchasePayload>("/coin", {
         token,
         body: {
@@ -48,40 +49,37 @@ export function BuyCoinPanel({ packages = [], onChanged }: Props) {
         },
       });
 
-      let payment: PaymentPayload | null = null;
-      try {
-        const pay = await apiRequest<PaymentPayload>("/payment", {
-          token,
-          body: {
-            type: "coin",
-            reference_id: res.data.transaction_id,
-            method,
-          },
-        });
-        payment = pay.data;
-      } catch {
-        /* some backends embed payment fields in /coin */
-      }
+      // §6.1 Payment Add — ambil info pembayaran (QR / VA) — wajib
+      const pay = await apiRequest<PaymentPayload>("/payment", {
+        token,
+        body: {
+          type: "coin",
+          reference_id: res.data.transaction_id,
+          method,
+        },
+      });
 
-      const merged: PaymentPayload = {
-        payment_id: payment?.payment_id ?? res.data.transaction_id,
-        status: payment?.status ?? res.data.status ?? "pending",
-        payment_url: payment?.payment_url ?? res.data.payment_url ?? null,
-        reference: payment?.reference ?? res.data.reference,
-        amount: payment?.amount ?? res.data.amount,
-        coin: payment?.coin ?? res.data.coin,
-        method: payment?.method ?? method,
-        qr_url: payment?.qr_url ?? res.data.qr_url ?? null,
-        qr_image: payment?.qr_image ?? res.data.qr_image ?? null,
-        qr_content: payment?.qr_content ?? res.data.qr_content ?? null,
-        payment_code: payment?.payment_code ?? res.data.payment_code ?? null,
-        va_number: payment?.va_number ?? res.data.va_number ?? null,
-        expired_at: payment?.expired_at ?? res.data.expired_at ?? null,
+      const methodMeta = getPaymentMethod(method);
+      const merged = normalizePaymentPayload(pay.data, {
+        payment_id: pay.data.payment_id,
+        status: res.data.status ?? "pending",
+        payment_url: res.data.payment_url ?? null,
+        reference: res.data.reference,
+        amount: res.data.amount,
+        coin: res.data.coin,
+        method,
+        qr_url: res.data.qr_url ?? null,
+        qr_image: res.data.qr_image ?? null,
+        qr_content: res.data.qr_content ?? null,
+        payment_code: res.data.payment_code ?? null,
+        va_number: res.data.va_number ?? null,
+        expired_at: res.data.expired_at ?? null,
         transaction_id: res.data.transaction_id,
-      };
+      });
 
-      const methodLabel =
-        PAYMENT_METHODS.find((m) => m.code === method)?.label ?? method;
+      if (!merged.payment_id) {
+        throw new Error("payment_id tidak diterima dari gateway.");
+      }
 
       savePaymentSession({
         payment: merged,
@@ -89,7 +87,7 @@ export function BuyCoinPanel({ packages = [], onChanged }: Props) {
         coin: res.data.coin,
         amount: res.data.amount,
         method,
-        methodLabel,
+        methodLabel: methodMeta?.label ?? method,
         createdAt: Date.now(),
       });
 

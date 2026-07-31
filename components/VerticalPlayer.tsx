@@ -4,7 +4,7 @@ import { IconChevronLeft } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import videojs from "video.js";
 import type Player from "video.js/dist/types/player";
-import { isDoodSource, toDoodEmbedUrl } from "@/lib/dood-detect";
+import { isDoodSource } from "@/lib/dood-detect";
 import "video.js/dist/video-js.css";
 
 type VerticalPlayerProps = {
@@ -30,15 +30,12 @@ type ResolveResponse = {
   src?: string;
   type?: string;
   poster?: string | null;
-  fallback?: "embed" | null;
-  embedUrl?: string | null;
 };
 
 type ResolvedPlayable = {
   playSrc: string;
   type: string;
   poster?: string | null;
-  mode: "video" | "embed";
 };
 
 function inferMediaType(playSrc: string, resolvedType?: string): string {
@@ -48,48 +45,34 @@ function inferMediaType(playSrc: string, resolvedType?: string): string {
   return "video/mp4";
 }
 
+/**
+ * Same concept as doodplayer.md loadStream:
+ * Dood URL → /api/dood/resolve → proxied /api/dood/stream (no official embed = no watermark).
+ */
 async function resolvePlayableSrc(raw: string): Promise<ResolvedPlayable> {
   if (raw.startsWith("/api/dood/stream")) {
-    return { playSrc: raw, type: "video/mp4", mode: "video" };
+    return { playSrc: raw, type: "video/mp4" };
   }
 
   if (raw.includes(".m3u8")) {
-    return { playSrc: raw, type: "application/x-mpegURL", mode: "video" };
+    return { playSrc: raw, type: "application/x-mpegURL" };
   }
 
   if (isDoodSource(raw)) {
     const endpoint = `/api/dood/resolve?url=${encodeURIComponent(raw)}`;
-    try {
-      const res = await fetch(endpoint, { cache: "no-store" });
-      const data = (await res.json()) as ResolveResponse;
-      if (data.ok && data.src) {
-        return {
-          playSrc: data.src,
-          type: inferMediaType(data.src, data.type),
-          poster: data.poster,
-          mode: "video",
-        };
-      }
-      const embedUrl = data.embedUrl || toDoodEmbedUrl(raw);
-      if (embedUrl) {
-        return {
-          playSrc: embedUrl,
-          type: "video/mp4",
-          poster: data.poster,
-          mode: "embed",
-        };
-      }
-      throw new Error(data.error || "Gagal resolve Doodstream");
-    } catch (err) {
-      const embedUrl = toDoodEmbedUrl(raw);
-      if (embedUrl) {
-        return { playSrc: embedUrl, type: "video/mp4", mode: "embed" };
-      }
-      throw err instanceof Error ? err : new Error("Gagal resolve Doodstream");
+    const res = await fetch(endpoint, { cache: "no-store", credentials: "same-origin" });
+    const data = (await res.json()) as ResolveResponse;
+    if (!data.ok || !data.src) {
+      throw new Error(data.error || "Gagal resolve");
     }
+    return {
+      playSrc: data.src,
+      type: inferMediaType(data.src, data.type || "video/mp4"),
+      poster: data.poster,
+    };
   }
 
-  return { playSrc: raw, type: inferMediaType(raw), mode: "video" };
+  return { playSrc: raw, type: inferMediaType(raw) };
 }
 
 export function VerticalPlayer({
@@ -111,7 +94,7 @@ export function VerticalPlayer({
   const [showUi, setShowUi] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [embedSrc, setEmbedSrc] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
   const hideTimer = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const onNextRef = useRef(onNext);
@@ -155,7 +138,6 @@ export function VerticalPlayer({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setEmbedSrc(null);
     playingRef.current = false;
 
     const disposePlayer = () => {
@@ -183,7 +165,7 @@ export function VerticalPlayer({
     const tryAutoPlay = async (player: Player) => {
       if (cancelled || !activeRef.current) return;
       try {
-        await player.play();
+        await Promise.resolve(player.play());
         if (!cancelled) {
           playingRef.current = true;
           bumpUi();
@@ -192,12 +174,13 @@ export function VerticalPlayer({
         if (cancelled) return;
         try {
           player.muted(true);
-          await player.play();
+          await Promise.resolve(player.play());
           if (!cancelled) {
             playingRef.current = true;
             bumpUi();
           }
         } catch {
+          /* autoplay blocked — same as doodplayer.md */
           if (!cancelled) {
             playingRef.current = false;
             setShowUi(true);
@@ -206,12 +189,16 @@ export function VerticalPlayer({
       }
     };
 
-    const createPlayer = (): Player | null => {
+    /** Same pattern as doodplayer.md ensurePlayer() */
+    const ensurePlayer = (): Player | null => {
+      if (playerRef.current && !playerRef.current.isDisposed()) {
+        return playerRef.current;
+      }
+
       const mount = mountRef.current;
       if (!mount) return null;
 
-      disposePlayer();
-
+      mount.innerHTML = "";
       const videoEl = document.createElement("video");
       videoEl.className = "video-js vjs-big-play-centered vjs-fill";
       videoEl.setAttribute("playsinline", "true");
@@ -277,20 +264,13 @@ export function VerticalPlayer({
       return player;
     };
 
-    const attach = async () => {
+    /** Same concept as doodplayer.md loadStream() — no official embed */
+    const loadStream = async () => {
       try {
         const resolved = await resolvePlayableSrc(src);
         if (cancelled) return;
 
-        if (resolved.mode === "embed") {
-          disposePlayer();
-          setEmbedSrc(resolved.playSrc);
-          setLoading(false);
-          playingRef.current = true;
-          return;
-        }
-
-        const player = createPlayer();
+        const player = ensurePlayer();
         if (!player) {
           setError("Player tidak siap.");
           setLoading(false);
@@ -298,8 +278,8 @@ export function VerticalPlayer({
         }
 
         fitPlayer(player);
-        if (resolved.poster) player.poster(resolved.poster);
-        player.src({ src: resolved.playSrc, type: resolved.type });
+        player.poster(resolved.poster || "");
+        player.src({ src: resolved.playSrc, type: resolved.type || "video/mp4" });
         await new Promise<void>((resolveReady) => {
           player.ready(() => resolveReady());
         });
@@ -310,12 +290,13 @@ export function VerticalPlayer({
         await tryAutoPlay(player);
       } catch (err) {
         if (cancelled) return;
+        disposePlayer();
         setLoading(false);
-        setError(err instanceof Error ? err.message : "Gagal memuat video.");
+        setError(err instanceof Error ? err.message : "Gagal resolve");
       }
     };
 
-    void attach();
+    void loadStream();
 
     const onResize = () => {
       const player = playerRef.current;
@@ -329,11 +310,11 @@ export function VerticalPlayer({
       disposePlayer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [src]);
+  }, [src, reloadToken]);
 
   useEffect(() => {
     const player = playerRef.current;
-    if (!player || player.isDisposed() || embedSrc) return;
+    if (!player || player.isDisposed()) return;
     if (!active) {
       player.pause();
       playingRef.current = false;
@@ -343,7 +324,7 @@ export function VerticalPlayer({
       playingRef.current = false;
       setShowUi(true);
     });
-  }, [active, embedSrc]);
+  }, [active]);
 
   return (
     <div
@@ -382,21 +363,9 @@ export function VerticalPlayer({
           : undefined
       }
     >
-      {embedSrc ? (
-        <iframe
-          key={embedSrc}
-          src={active ? embedSrc : undefined}
-          title={title}
-          className="h-full w-full border-0"
-          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
-          allowFullScreen
-          referrerPolicy="origin"
-        />
-      ) : (
-        <div className="player-stage absolute inset-0">
-          <div ref={mountRef} className="absolute inset-0 h-full w-full" />
-        </div>
-      )}
+      <div className="player-stage absolute inset-0">
+        <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+      </div>
 
       <div
         className={`pointer-events-none absolute inset-0 z-20 bg-gradient-to-b from-black/55 via-transparent to-transparent transition-opacity duration-300 ${
@@ -429,15 +398,25 @@ export function VerticalPlayer({
         </div>
       </div>
 
-      {loading && !error && !embedSrc && (
+      {loading && !error && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
           <div className="h-10 w-10 animate-spin rounded-full border-2 border-white/20 border-t-[var(--accent)]" />
         </div>
       )}
 
       {error && (
-        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 px-8 text-center">
-          <p className="text-sm text-white/80">{error}</p>
+        <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-3 bg-black/70 px-8 text-center">
+          <p className="text-sm text-rose-300">{error}</p>
+          <button
+            type="button"
+            className="pointer-events-auto rounded-full bg-[var(--accent)] px-5 py-2.5 text-sm font-semibold text-[#1a0b10]"
+            onClick={(e) => {
+              e.stopPropagation();
+              setReloadToken((n) => n + 1);
+            }}
+          >
+            Coba lagi
+          </button>
         </div>
       )}
 

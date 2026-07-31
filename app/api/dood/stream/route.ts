@@ -2,6 +2,7 @@ import { DOOD_UA, parseStreamTicket } from "@/lib/doodstream";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 const FORWARD_HEADERS = [
   "content-type",

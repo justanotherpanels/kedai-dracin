@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Native napi-rs bindings (Chrome TLS impersonation for Doodstream on Vercel)
+  serverExternalPackages: ["impit"],
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "ik.imagekit.io" },

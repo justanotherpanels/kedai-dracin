@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "fs
 import { tmpdir } from "os";
 import { join } from "path";
 import { promisify } from "util";
+import { Impit } from "impit";
 import {
   DOOD_BOOTSTRAP_ORIGINS,
   doodOrigin,
@@ -14,21 +15,6 @@ const execFileAsync = promisify(execFile);
 
 export const DOOD_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
-
-const BROWSER_HEADERS = [
-  "Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-  "Accept-Language: en-US,en;q=0.9,id;q=0.8",
-  "Cache-Control: no-cache",
-  "Pragma: no-cache",
-  "Upgrade-Insecure-Requests: 1",
-  'sec-ch-ua: "Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
-  "sec-ch-ua-mobile: ?0",
-  'sec-ch-ua-platform: "Windows"',
-  "Sec-Fetch-Dest: document",
-  "Sec-Fetch-Mode: navigate",
-  "Sec-Fetch-Site: cross-site",
-  "Sec-Fetch-User: ?1",
-];
 
 function streamSecret() {
   return process.env.DOOD_STREAM_SECRET || "doodplayer-change-me-in-production";
@@ -43,6 +29,28 @@ type HttpResult = {
   status: number;
   url: string;
 };
+
+type RequestOpts = {
+  referer?: string;
+  headers?: Record<string, string>;
+  timeout?: number;
+  /** Only used by curl fallback */
+  cookieFile?: string;
+};
+
+function isCloudflareInterstitial(html: string): boolean {
+  return (
+    /<title[^>]*>\s*Just a moment/i.test(html) ||
+    /cf-browser-verification|cf-challenge-running|Attention Required!|Enable JavaScript and cookies to continue/i.test(
+      html,
+    ) ||
+    (/cf-turnstile/i.test(html) && !/\/pass_md5\//i.test(html))
+  );
+}
+
+function softBlockedMessage(status: number) {
+  return `pass_md5 tidak ditemukan di halaman embed (HTTP ${status}). Server cloud (Vercel) sering diblokir mirror Doodstream — pastikan resolve memakai TLS browser (impit).`;
+}
 
 let cachedCurl: string | null | undefined;
 
@@ -59,9 +67,7 @@ async function findCurlBinary(): Promise<string | null> {
   candidates.push("curl");
 
   for (const bin of candidates) {
-    if (bin.includes("\\") || bin.includes("/")) {
-      if (!existsSync(bin)) continue;
-    }
+    if ((bin.includes("\\") || bin.includes("/")) && !existsSync(bin)) continue;
     try {
       await execFileAsync(bin, ["--version"], { timeout: 5000, windowsHide: true });
       cachedCurl = bin;
@@ -75,32 +81,10 @@ async function findCurlBinary(): Promise<string | null> {
   return null;
 }
 
-function requireCurlMessage() {
-  if (process.platform === "win32") {
-    return "Cloudflare memblokir resolve. Pastikan curl.exe tersedia di PATH (Windows), misalnya C:\\Windows\\System32\\curl.exe.";
-  }
-  return "Cloudflare memblokir resolve. Install curl CLI agar fingerprint TLS lolos challenge.";
-}
-
-function isCloudflareInterstitial(html: string): boolean {
-  return (
-    /<title[^>]*>\s*Just a moment/i.test(html) ||
-    /cf-browser-verification|cf-challenge-running|Attention Required!|Enable JavaScript and cookies to continue/i.test(
-      html,
-    ) ||
-    (/cf-turnstile/i.test(html) && !/\/pass_md5\//i.test(html))
-  );
-}
-
 async function httpRequestCli(
   bin: string,
   url: string,
-  opts: {
-    referer?: string;
-    cookieFile?: string;
-    headers?: string[];
-    timeout?: number;
-  } = {},
+  opts: RequestOpts = {},
 ): Promise<HttpResult> {
   const bodyDir = mkdtempSync(join(tmpdir(), "doodb-"));
   const bodyFile = join(bodyDir, "body.bin");
@@ -124,7 +108,11 @@ async function httpRequestCli(
 
   if (opts.referer) args.push("-e", opts.referer);
   if (opts.cookieFile) args.push("-c", opts.cookieFile, "-b", opts.cookieFile);
-  for (const header of opts.headers ?? []) args.push("-H", header);
+  if (opts.headers) {
+    for (const [key, value] of Object.entries(opts.headers)) {
+      args.push("-H", `${key}: ${value}`);
+    }
+  }
   args.push(url);
 
   try {
@@ -139,10 +127,11 @@ async function httpRequestCli(
       .trim()
       .split("\n")
       .filter(Boolean);
-    const status = Number(lines[0] || 0);
-    const finalUrl = lines[1] || url;
-    const body = readFileSync(bodyFile, "utf8");
-    return { body, status, url: finalUrl };
+    return {
+      status: Number(lines[0] || 0),
+      url: lines[1] || url,
+      body: readFileSync(bodyFile, "utf8"),
+    };
   } finally {
     try {
       rmSync(bodyDir, { recursive: true, force: true });
@@ -152,24 +141,69 @@ async function httpRequestCli(
   }
 }
 
+/** Minimal cookie jar compatible with ImpitOptions.cookieJar */
+function createMemoryCookieJar() {
+  const jar = new Map<string, Map<string, string>>();
+
+  return {
+    setCookie(cookie: string, url: string) {
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        const [pair] = cookie.split(";");
+        const eq = pair.indexOf("=");
+        if (eq <= 0) return;
+        const name = pair.slice(0, eq).trim();
+        const value = pair.slice(eq + 1).trim();
+        if (!jar.has(host)) jar.set(host, new Map());
+        jar.get(host)!.set(name, value);
+      } catch {
+        /* ignore malformed */
+      }
+    },
+    getCookieString(url: string) {
+      try {
+        const host = new URL(url).hostname.toLowerCase();
+        const parts: string[] = [];
+        for (const [h, cookies] of jar) {
+          if (host === h || host.endsWith(`.${h}`)) {
+            for (const [name, value] of cookies) parts.push(`${name}=${value}`);
+          }
+        }
+        return parts.join("; ");
+      } catch {
+        return "";
+      }
+    },
+  };
+}
+
 /**
- * curl CLI needed to bypass Cloudflare TLS fingerprint.
- * Node fetch / undici almost always gets the interstitial.
+ * Chrome TLS impersonation — works on Vercel Linux where plain curl/fetch
+ * get soft-blocked (HTTP 200 HTML without pass_md5).
  */
-async function httpRequest(
+async function httpRequestImpit(
+  client: Impit,
   url: string,
-  opts: {
-    referer?: string;
-    cookieFile?: string;
-    headers?: string[];
-    timeout?: number;
-  } = {},
+  opts: RequestOpts = {},
 ): Promise<HttpResult> {
-  const bin = await findCurlBinary();
-  if (!bin) {
-    throw new Error(requireCurlMessage());
-  }
-  return httpRequestCli(bin, url, opts);
+  const headers: Record<string, string> = {
+    Accept: "*/*",
+    "Accept-Language": "en-US,en;q=0.9,id;q=0.8",
+    ...(opts.headers ?? {}),
+  };
+  if (opts.referer) headers.Referer = opts.referer;
+
+  const res = await client.fetch(url, {
+    headers,
+    redirect: "follow",
+    timeout: (opts.timeout ?? 45) * 1000,
+  });
+
+  return {
+    body: await res.text(),
+    status: res.status,
+    url: res.url || url,
+  };
 }
 
 export type ResolvedDood = {
@@ -194,7 +228,7 @@ function uniqueOrigins(inputUrl: string): string[] {
   return out;
 }
 
-function parseEmbedMeta(html: string): {
+function parseEmbedMeta(html: string, status: number): {
   passPath: string;
   token: string;
   poster: string | null;
@@ -203,9 +237,11 @@ function parseEmbedMeta(html: string): {
   const passMatch = html.match(/(\/pass_md5\/[a-zA-Z0-9_./-]+)/);
   if (!passMatch) {
     if (isCloudflareInterstitial(html)) {
-      throw new Error(requireCurlMessage());
+      throw new Error(
+        "Cloudflare challenge memblokir resolve. Coba lagi atau pastikan impit ter-deploy di Vercel.",
+      );
     }
-    throw new Error("pass_md5 tidak ditemukan di halaman embed");
+    throw new Error(softBlockedMessage(status));
   }
   const passPath = passMatch[1];
 
@@ -246,14 +282,35 @@ export async function resolveDoodStream(inputUrl: string): Promise<ResolvedDood>
     throw new Error("URL / file code Doodstream tidak valid");
   }
 
-  // Ensure curl is present before doing network work
-  if (!(await findCurlBinary())) {
-    throw new Error(requireCurlMessage());
+  // Prefer Chrome TLS impersonation (Vercel-safe). Fallback to system curl on Windows.
+  let client: Impit | null = null;
+  try {
+    client = new Impit({
+      browser: "chrome",
+      timeout: 45_000,
+      followRedirects: true,
+      maxRedirects: 8,
+      cookieJar: createMemoryCookieJar(),
+    });
+  } catch {
+    client = null;
   }
 
-  const cookieDir = mkdtempSync(join(tmpdir(), "doodck-"));
-  const cookieFile = join(cookieDir, "cookies.txt");
-  writeFileSync(cookieFile, "# Netscape HTTP Cookie File\n");
+  const curlBin = client ? null : await findCurlBinary();
+  if (!client && !curlBin) {
+    throw new Error(
+      "Tidak ada HTTP client untuk bypass Cloudflare (impit/curl). Install dependency impit.",
+    );
+  }
+
+  const cookieDir = curlBin ? mkdtempSync(join(tmpdir(), "doodck-")) : null;
+  const cookieFile = cookieDir ? join(cookieDir, "cookies.txt") : undefined;
+  if (cookieFile) writeFileSync(cookieFile, "# Netscape HTTP Cookie File\n");
+
+  const request = async (url: string, opts: RequestOpts = {}) => {
+    if (client) return httpRequestImpit(client, url, opts);
+    return httpRequestCli(curlBin!, url, { ...opts, cookieFile });
+  };
 
   const origins = uniqueOrigins(inputUrl);
   let lastError: Error | null = null;
@@ -262,19 +319,25 @@ export async function resolveDoodStream(inputUrl: string): Promise<ResolvedDood>
     for (const origin of origins) {
       const embedUrl = `${origin}/e/${encodeURIComponent(fileCode)}`;
       try {
-        const page = await httpRequest(embedUrl, {
+        const page = await request(embedUrl, {
           referer: `${origin}/`,
-          cookieFile,
-          headers: [...BROWSER_HEADERS, "Accept: text/html"],
+          headers: {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Upgrade-Insecure-Requests": "1",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "cross-site",
+            "Sec-Fetch-User": "?1",
+          },
         });
         const html = page.body;
 
         if (!/\/pass_md5\//i.test(html)) {
-          if (isCloudflareInterstitial(html)) {
-            lastError = new Error(requireCurlMessage());
-            continue;
-          }
-          lastError = new Error(`pass_md5 tidak ditemukan di halaman embed (HTTP ${page.status})`);
+          lastError = isCloudflareInterstitial(html)
+            ? new Error(
+                "Cloudflare challenge memblokir resolve. Coba lagi atau pastikan impit ter-deploy di Vercel.",
+              )
+            : new Error(softBlockedMessage(page.status));
           continue;
         }
 
@@ -286,19 +349,17 @@ export async function resolveDoodStream(inputUrl: string): Promise<ResolvedDood>
           /* keep origin */
         }
 
-        const meta = parseEmbedMeta(html);
+        const meta = parseEmbedMeta(html, page.status);
 
-        const pass = await httpRequest(`${playOrigin}${meta.passPath}`, {
+        const pass = await request(`${playOrigin}${meta.passPath}`, {
           referer: `${playOrigin}/e/${fileCode}`,
-          cookieFile,
-          headers: [
-            "X-Requested-With: XMLHttpRequest",
-            "Accept: */*",
-            "Accept-Language: en-US,en;q=0.9",
-            "Sec-Fetch-Dest: empty",
-            "Sec-Fetch-Mode: cors",
-            "Sec-Fetch-Site: same-origin",
-          ],
+          headers: {
+            "X-Requested-With": "XMLHttpRequest",
+            Accept: "*/*",
+            "Sec-Fetch-Dest": "empty",
+            "Sec-Fetch-Mode": "cors",
+            "Sec-Fetch-Site": "same-origin",
+          },
         });
 
         const cdnPrefix = pass.body.trim();
@@ -329,10 +390,12 @@ export async function resolveDoodStream(inputUrl: string): Promise<ResolvedDood>
 
     throw lastError ?? new Error("Gagal resolve Doodstream");
   } finally {
-    try {
-      rmSync(cookieDir, { recursive: true, force: true });
-    } catch {
-      /* ignore */
+    if (cookieDir) {
+      try {
+        rmSync(cookieDir, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
     }
   }
 }

@@ -1,5 +1,6 @@
-<!-- BEGIN:nextjs-agent-rules -->
-# This is NOT the Next.js you know
+perbaharui designnya
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.
-<!-- END:nextjs-agent-rules -->
+-buttom menu fixed
+-buttom menu Beranda,Drama(Auto Play Drama),Tersimpan,Akun
+-web diakses ponsel grid 2x10 dan unfinity scrool
+-web di akses tablet grid 4x10 dan unfinity scroll

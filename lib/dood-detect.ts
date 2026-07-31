@@ -87,3 +87,10 @@ export function doodOrigin(sourceUrl?: string): string {
   }
   return `https://${host}`;
 }
+
+/** Canonical embed URL for iframe fallback when server-side resolve is CF-blocked. */
+export function toDoodEmbedUrl(input: string): string | null {
+  const fileCode = extractDoodFileCode(input);
+  if (!fileCode) return null;
+  return `${doodOrigin(input)}/e/${encodeURIComponent(fileCode)}`;
+}

@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Outfit, Plus_Jakarta_Sans } from "next/font/google";
+import { Analytics } from "@vercel/analytics/next";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { AuthProvider } from "@/components/AuthProvider";
 import "./globals.css";
 
@@ -47,6 +49,8 @@ export default function RootLayout({
     <html lang="id" className={`${body.variable} ${display.variable} h-full`}>
       <body className={`${body.className} min-h-dvh antialiased`}>
         <AuthProvider>{children}</AuthProvider>
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

@@ -1,4 +1,5 @@
 import { createStreamTicket, resolveDoodStream } from "@/lib/doodstream";
+import { toDoodEmbedUrl } from "@/lib/dood-detect";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,15 @@ export async function GET(request: Request) {
     );
   } catch (err) {
     const message = err instanceof Error ? err.message : "Gagal resolve Doodstream";
-    return Response.json({ ok: false, error: message }, { status: 400 });
+    const embedUrl = toDoodEmbedUrl(url);
+    return Response.json(
+      {
+        ok: false,
+        error: message,
+        fallback: embedUrl ? "embed" : null,
+        embedUrl,
+      },
+      { status: 400, headers: { "Cache-Control": "no-store" } },
+    );
   }
 }

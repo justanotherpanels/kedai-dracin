@@ -1,8 +1,20 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Native napi-rs bindings (Chrome TLS impersonation for Doodstream on Vercel)
+  // Native napi-rs bindings must not be bundled by Turbopack/webpack
   serverExternalPackages: ["impit"],
+  // Ensure platform .node binaries ship with Vercel serverless functions
+  outputFileTracingIncludes: {
+    "/api/dood/*": [
+      "./node_modules/impit/**/*",
+      "./node_modules/impit-linux-x64-gnu/**/*",
+      "./node_modules/impit-linux-x64-musl/**/*",
+      "./node_modules/impit-linux-arm64-gnu/**/*",
+      "./node_modules/impit-linux-arm64-musl/**/*",
+      "./node_modules/impit-win32-x64-msvc/**/*",
+      "./node_modules/impit-darwin-*/**/*",
+    ],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "ik.imagekit.io" },

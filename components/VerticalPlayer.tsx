@@ -3,7 +3,7 @@
 import Hls from "hls.js";
 import { IconChevronLeft, IconPlayerPlayFilled, IconVolume, IconVolumeOff } from "@tabler/icons-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { isDoodSource } from "@/lib/dood-detect";
+import { isDoodSource, toDoodEmbedUrl } from "@/lib/dood-detect";
 
 type VerticalPlayerProps = {
   src: string;
@@ -28,27 +28,42 @@ type ResolveResponse = {
   src?: string;
   type?: string;
   poster?: string | null;
+  fallback?: "embed" | null;
+  embedUrl?: string | null;
 };
 
 async function resolvePlayableSrc(raw: string): Promise<{
   playSrc: string;
   poster?: string | null;
+  mode: "video" | "embed";
 }> {
   if (raw.includes(".m3u8") || raw.startsWith("/api/dood/stream")) {
-    return { playSrc: raw };
+    return { playSrc: raw, mode: "video" };
   }
 
   if (isDoodSource(raw)) {
     const endpoint = `/api/dood/resolve?url=${encodeURIComponent(raw)}`;
-    const res = await fetch(endpoint, { cache: "no-store" });
-    const data = (await res.json()) as ResolveResponse;
-    if (!data.ok || !data.src) {
+    try {
+      const res = await fetch(endpoint, { cache: "no-store" });
+      const data = (await res.json()) as ResolveResponse;
+      if (data.ok && data.src) {
+        return { playSrc: data.src, poster: data.poster, mode: "video" };
+      }
+      const embedUrl = data.embedUrl || toDoodEmbedUrl(raw);
+      if (embedUrl) {
+        return { playSrc: embedUrl, poster: data.poster, mode: "embed" };
+      }
       throw new Error(data.error || "Gagal resolve Doodstream");
+    } catch (err) {
+      const embedUrl = toDoodEmbedUrl(raw);
+      if (embedUrl) {
+        return { playSrc: embedUrl, mode: "embed" };
+      }
+      throw err instanceof Error ? err : new Error("Gagal resolve Doodstream");
     }
-    return { playSrc: data.src, poster: data.poster };
   }
 
-  return { playSrc: raw };
+  return { playSrc: raw, mode: "video" };
 }
 
 export function VerticalPlayer({
@@ -73,6 +88,7 @@ export function VerticalPlayer({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [poster, setPoster] = useState<string | undefined>();
+  const [embedSrc, setEmbedSrc] = useState<string | null>(null);
   const hideTimer = useRef<number | null>(null);
   const touchStartY = useRef<number | null>(null);
   const onNextRef = useRef(onNext);
@@ -95,7 +111,7 @@ export function VerticalPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !src) return;
+    if (!src) return;
 
     let hls: Hls | null = null;
     let cancelled = false;
@@ -104,16 +120,17 @@ export function VerticalPlayer({
     setError(null);
     setProgress(0);
     setPoster(undefined);
+    setEmbedSrc(null);
     setPlaying(true);
 
     const tryAutoPlay = async () => {
-      if (cancelled) return;
+      if (cancelled || !video) return;
       try {
         video.muted = mutedRef.current;
         await video.play();
         if (!cancelled) setPlaying(true);
       } catch {
-        if (cancelled) return;
+        if (cancelled || !video) return;
         try {
           video.muted = true;
           setMuted(true);
@@ -141,10 +158,10 @@ export function VerticalPlayer({
       setPlaying(true);
     };
     const onPause = () => {
-      if (!cancelled && !video.ended) setPlaying(false);
+      if (!cancelled && video && !video.ended) setPlaying(false);
     };
     const onTime = () => {
-      if (cancelled) return;
+      if (cancelled || !video) return;
       setProgress(video.currentTime);
       setDuration(video.duration || 0);
     };
@@ -163,22 +180,36 @@ export function VerticalPlayer({
       setShowUi(true);
     };
 
-    video.addEventListener("canplay", onCanPlay);
-    video.addEventListener("waiting", onWaiting);
-    video.addEventListener("playing", onPlaying);
-    video.addEventListener("pause", onPause);
-    video.addEventListener("timeupdate", onTime);
-    video.addEventListener("error", onErr);
-    video.addEventListener("ended", onEnded);
+    if (video) {
+      video.addEventListener("canplay", onCanPlay);
+      video.addEventListener("waiting", onWaiting);
+      video.addEventListener("playing", onPlaying);
+      video.addEventListener("pause", onPause);
+      video.addEventListener("timeupdate", onTime);
+      video.addEventListener("error", onErr);
+      video.addEventListener("ended", onEnded);
+    }
 
     const attach = async () => {
       try {
-        const { playSrc, poster: nextPoster } = await resolvePlayableSrc(src);
+        const { playSrc, poster: nextPoster, mode } = await resolvePlayableSrc(src);
         if (cancelled) return;
 
         if (nextPoster) {
           setPoster(nextPoster);
-          video.poster = nextPoster;
+          if (video) video.poster = nextPoster;
+        }
+
+        if (mode === "embed") {
+          setEmbedSrc(playSrc);
+          setLoading(false);
+          setPlaying(true);
+          return;
+        }
+
+        if (!video) {
+          setError("Player tidak siap.");
+          return;
         }
 
         if (playSrc.includes(".m3u8")) {
@@ -215,22 +246,26 @@ export function VerticalPlayer({
 
     return () => {
       cancelled = true;
-      video.removeEventListener("canplay", onCanPlay);
-      video.removeEventListener("waiting", onWaiting);
-      video.removeEventListener("playing", onPlaying);
-      video.removeEventListener("pause", onPause);
-      video.removeEventListener("timeupdate", onTime);
-      video.removeEventListener("error", onErr);
-      video.removeEventListener("ended", onEnded);
+      if (video) {
+        video.removeEventListener("canplay", onCanPlay);
+        video.removeEventListener("waiting", onWaiting);
+        video.removeEventListener("playing", onPlaying);
+        video.removeEventListener("pause", onPause);
+        video.removeEventListener("timeupdate", onTime);
+        video.removeEventListener("error", onErr);
+        video.removeEventListener("ended", onEnded);
+      }
       try {
         hls?.destroy();
       } catch {
         /* ignore */
       }
       try {
-        video.pause();
-        video.removeAttribute("src");
-        video.load();
+        if (video) {
+          video.pause();
+          video.removeAttribute("src");
+          video.load();
+        }
       } catch {
         /* ignore */
       }
@@ -239,20 +274,20 @@ export function VerticalPlayer({
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || embedSrc) return;
     if (!active) {
       video.pause();
       setPlaying(false);
       return;
     }
     void video.play().catch(() => setPlaying(false));
-  }, [active]);
+  }, [active, embedSrc]);
 
   useEffect(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || embedSrc) return;
     video.muted = muted;
-  }, [muted]);
+  }, [muted, embedSrc]);
 
   const bumpUi = () => {
     setShowUi(true);
@@ -271,6 +306,7 @@ export function VerticalPlayer({
   }, [src, playing]);
 
   const togglePlay = () => {
+    if (embedSrc) return;
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -283,7 +319,7 @@ export function VerticalPlayer({
 
   const seek = (value: number) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || embedSrc) return;
     video.currentTime = value;
     setProgress(value);
   };
@@ -333,26 +369,40 @@ export function VerticalPlayer({
           : undefined
       }
     >
-      <video
-        ref={videoRef}
-        className="h-full w-full object-contain"
-        playsInline
-        autoPlay={active}
-        preload="auto"
-        poster={poster}
-        onDoubleClick={togglePlay}
-      />
+      {embedSrc ? (
+        <iframe
+          key={embedSrc}
+          src={active ? embedSrc : undefined}
+          title={title}
+          className="h-full w-full border-0"
+          allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+          allowFullScreen
+          referrerPolicy="origin"
+        />
+      ) : (
+        <video
+          ref={videoRef}
+          className="h-full w-full object-contain"
+          playsInline
+          autoPlay={active}
+          preload="auto"
+          poster={poster}
+          onDoubleClick={togglePlay}
+        />
+      )}
 
-      <button
-        type="button"
-        aria-label={playing ? "Pause" : "Play"}
-        className="absolute inset-0 z-10"
-        style={{ touchAction: allowSwipeNav ? "none" : "pan-y" }}
-        onClick={(e) => {
-          e.stopPropagation();
-          togglePlay();
-        }}
-      />
+      {!embedSrc && (
+        <button
+          type="button"
+          aria-label={playing ? "Pause" : "Play"}
+          className="absolute inset-0 z-10"
+          style={{ touchAction: allowSwipeNav ? "none" : "pan-y" }}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePlay();
+          }}
+        />
+      )}
 
       <div
         className={`pointer-events-none absolute inset-0 z-20 bg-gradient-to-b from-black/55 via-transparent to-black/70 transition-opacity duration-300 ${
@@ -382,21 +432,23 @@ export function VerticalPlayer({
             <p className="truncate font-[family-name:var(--font-display)] text-base leading-tight">{title}</p>
             <p className="text-xs text-white/65">{episodeLabel}</p>
           </div>
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              setMuted((m) => !m);
-              bumpUi();
-            }}
-            className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur"
-          >
-            {muted ? <IconVolumeOff size={20} stroke={1.8} /> : <IconVolume size={20} stroke={1.8} />}
-          </button>
+          {!embedSrc && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMuted((m) => !m);
+                bumpUi();
+              }}
+              className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur"
+            >
+              {muted ? <IconVolumeOff size={20} stroke={1.8} /> : <IconVolume size={20} stroke={1.8} />}
+            </button>
+          )}
         </div>
       </div>
 
-      {!playing && showUi && !loading && !error && (
+      {!embedSrc && !playing && showUi && !loading && !error && (
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
           <div className="flex h-16 w-16 items-center justify-center rounded-full bg-black/45 backdrop-blur">
             <IconPlayerPlayFilled size={32} className="ml-0.5 text-white" />
@@ -453,21 +505,23 @@ export function VerticalPlayer({
           </button>
         </div>
 
-        <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
-          <input
-            type="range"
-            min={0}
-            max={duration || 0}
-            step={0.1}
-            value={progress}
-            onChange={(e) => seek(Number(e.target.value))}
-            className="player-seek w-full"
-          />
-          <div className="mt-1 flex justify-between text-[11px] text-white/55">
-            <span>{format(progress)}</span>
-            <span>{format(duration)}</span>
+        {!embedSrc && (
+          <div className="pointer-events-auto" onClick={(e) => e.stopPropagation()}>
+            <input
+              type="range"
+              min={0}
+              max={duration || 0}
+              step={0.1}
+              value={progress}
+              onChange={(e) => seek(Number(e.target.value))}
+              className="player-seek w-full"
+            />
+            <div className="mt-1 flex justify-between text-[11px] text-white/55">
+              <span>{format(progress)}</span>
+              <span>{format(duration)}</span>
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );

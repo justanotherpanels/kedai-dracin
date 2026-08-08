@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
 import { API_BASE_URL } from "@/lib/config";
 import type { Drama } from "@/lib/types";
-
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
-  // Mengambil origin dari API_BASE_URL (contoh: https://agendracin.web.id)
-  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || new URL(API_BASE_URL).origin;
+  // Menggunakan URL dari Vercel (otomatis) atau localhost sebagai fallback
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 
+    (process.env.VERCEL_PROJECT_PRODUCTION_URL ? `https://${process.env.VERCEL_PROJECT_PRODUCTION_URL}` : 
+    (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "http://localhost:3000"));
 
   let dramas: Drama[] = [];
   try {

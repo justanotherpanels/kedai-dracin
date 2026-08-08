@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { IconShare } from "@tabler/icons-react";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type BeforeInstallPromptEvent = Event & {
@@ -12,6 +13,7 @@ export function InstallPWA() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isVisible, setIsVisible] = useState(false);
   const [isStandalone, setIsStandalone] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
 
   useEffect(() => {
     // Check if running as standalone
@@ -19,6 +21,15 @@ export function InstallPWA() {
     if (window.matchMedia("(display-mode: standalone)").matches || (window.navigator as any).standalone) {
       setIsStandalone(true);
       return;
+    }
+
+    // Detect iOS
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
+    setIsIOS(isIOSDevice);
+
+    if (isIOSDevice && localStorage.getItem("pwa_dismissed") !== "true") {
+      setIsVisible(true);
     }
 
     const handler = (e: Event) => {
@@ -48,6 +59,10 @@ export function InstallPWA() {
   }, []);
 
   const handleInstallClick = async () => {
+    if (isIOS) {
+      // iOS doesn't support automatic prompt, let the user read the manual instruction on the UI
+      return;
+    }
     if (!deferredPrompt) return;
     deferredPrompt.prompt();
     const { outcome } = await deferredPrompt.userChoice;
@@ -83,12 +98,22 @@ export function InstallPWA() {
             <p className="text-xs text-white/60 mt-0.5">Akses lebih cepat & tanpa browser frame</p>
           </div>
         </div>
-        <button 
-          onClick={handleInstallClick}
-          className="w-full bg-[var(--accent)] text-[#1a0b10] font-bold py-2.5 rounded-xl transition hover:brightness-110 active:scale-95 text-sm"
-        >
-          Install App
-        </button>
+        
+        {isIOS ? (
+          <div className="bg-white/5 p-3 rounded-xl mt-2 text-xs text-white/80 flex items-center space-x-2">
+            <IconShare size={24} className="shrink-0 text-white/60" />
+            <p>
+              Untuk menginstal di iOS: Tap tombol <strong>Share</strong> di bawah, lalu gulir dan pilih <strong>"Add to Home Screen"</strong>.
+            </p>
+          </div>
+        ) : (
+          <button 
+            onClick={handleInstallClick}
+            className="w-full bg-[var(--accent)] text-[#1a0b10] font-bold py-2.5 rounded-xl transition hover:brightness-110 active:scale-95 text-sm"
+          >
+            Install App
+          </button>
+        )}
       </div>
     </div>
   );

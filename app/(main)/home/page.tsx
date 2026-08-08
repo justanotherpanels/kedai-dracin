@@ -69,12 +69,14 @@ export default function HomePage() {
     let cancelled = false;
     void (async () => {
       try {
-        const [sliderRes, trendRes, likedRes, providerRes] = await Promise.all([
+        const promises = [
           apiRequest<SliderItem[]>("/dashboard/slider", { token }),
           apiRequest<Drama[]>("/play/trending", { token, query: { limit: 10 } }),
           apiRequest<Drama[]>("/drama/most-liked", { token, query: { limit: 10 } }),
           apiRequest<DramaProvider[]>("/provider", { token, query: { limit: 30 } }),
-        ]);
+        ];
+        promises.forEach((p) => p.catch(() => {}));
+        const [sliderRes, trendRes, likedRes, providerRes] = await Promise.all(promises);
         if (cancelled) return;
         setSliders((sliderRes.data ?? []).filter((item) => item?.drama));
         setTrending(trendRes.data ?? []);

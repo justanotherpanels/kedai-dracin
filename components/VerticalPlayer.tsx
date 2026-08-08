@@ -378,7 +378,7 @@ export function VerticalPlayer({
       />
 
       <div
-        className={`absolute inset-x-0 top-0 z-30 px-4 pt-[max(1rem,env(safe-area-inset-top))] transition-opacity duration-300 ${
+        className={`pointer-events-none absolute inset-x-0 top-0 z-30 px-4 pt-[max(1rem,env(safe-area-inset-top))] transition-opacity duration-300 ${
           showUi ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -390,7 +390,7 @@ export function VerticalPlayer({
                 e.stopPropagation();
                 onBack();
               }}
-              className="pointer-events-auto flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur"
+              className={`flex h-10 w-10 items-center justify-center rounded-full bg-black/35 backdrop-blur ${showUi ? "pointer-events-auto" : ""}`}
             >
               <IconChevronLeft size={20} stroke={2} />
             </button>
@@ -431,7 +431,7 @@ export function VerticalPlayer({
       )}
 
       <div
-        className={`absolute inset-x-0 bottom-14 z-30 px-4 transition-opacity duration-300 ${
+        className={`pointer-events-none absolute inset-x-0 bottom-14 z-30 px-4 transition-opacity duration-300 ${
           showUi ? "opacity-100" : "opacity-0"
         }`}
       >
@@ -443,7 +443,7 @@ export function VerticalPlayer({
               e.stopPropagation();
               onPrev?.();
             }}
-            className="pointer-events-auto rounded-full bg-white/10 px-4 py-2 text-xs font-medium disabled:opacity-30"
+            className={`rounded-full bg-white/10 px-4 py-2 text-xs font-medium disabled:opacity-30 ${showUi ? "pointer-events-auto" : ""}`}
           >
             Sebelumnya
           </button>
@@ -455,7 +455,7 @@ export function VerticalPlayer({
               e.stopPropagation();
               onNext?.();
             }}
-            className="pointer-events-auto rounded-full bg-white/10 px-4 py-2 text-xs font-medium disabled:opacity-30"
+            className={`rounded-full bg-white/10 px-4 py-2 text-xs font-medium disabled:opacity-30 ${showUi ? "pointer-events-auto" : ""}`}
           >
             Berikutnya
           </button>

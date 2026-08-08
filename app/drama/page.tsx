@@ -178,8 +178,8 @@ function DramaFeed() {
           [dramaId]: { ...current, liked: true, likesCount: res.data.likes_count },
         }));
       }
-    } catch {
-      /* ignore UI toast for now */
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal menyukai drama");
     } finally {
       setEngageBusy((prev) => ({ ...prev, [dramaId]: false }));
     }
@@ -207,8 +207,8 @@ function DramaFeed() {
           [dramaId]: { ...current, saved: true },
         }));
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal menyimpan drama");
     } finally {
       setEngageBusy((prev) => ({ ...prev, [dramaId]: false }));
     }

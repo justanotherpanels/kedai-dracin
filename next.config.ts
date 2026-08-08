@@ -22,6 +22,8 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "**.b-cdn.net" },
       { protocol: "https", hostname: "**.ngrok-free.dev" },
       { protocol: "https", hostname: "**.ngrok-free.app" },
+      { protocol: "https", hostname: "acf.goodreels.com" },
+      { protocol: "https", hostname: "hwztchapter.dramaboxdb.com" },
       { protocol: "http", hostname: "localhost" },
       { protocol: "http", hostname: "127.0.0.1" },
     ],

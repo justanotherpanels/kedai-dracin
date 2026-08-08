@@ -254,8 +254,8 @@ function WatchContent() {
         setLiked(true);
         setLikesCount(res.data.likes_count);
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal menyukai drama");
     } finally {
       setEngageBusy(false);
     }
@@ -276,8 +276,8 @@ function WatchContent() {
         await apiRequest("/saved-drama", { token, body: { id_drama: dramaId } });
         setSaved(true);
       }
-    } catch {
-      /* ignore */
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Gagal menyimpan drama");
     } finally {
       setEngageBusy(false);
     }

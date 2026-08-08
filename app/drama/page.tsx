@@ -292,16 +292,14 @@ function DramaFeed() {
                   else if (hasMore) void loadMore();
                 }}
                 onBack={() => router.replace(`/drama/${drama.id}`)}
-                sideActions={
-                  <DramaEngageActions
-                    liked={state.liked}
-                    saved={state.saved}
-                    likesCount={state.likesCount}
-                    busy={engageBusy[drama.id]}
-                    onToggleLike={() => void toggleLike(drama.id)}
-                    onToggleSave={() => void toggleSave(drama.id)}
-                  />
-                }
+                dramaMeta={drama}
+                currentEp={null}
+                episodes={[]}
+                liked={state.liked}
+                saved={state.saved}
+                likesCount={state.likesCount}
+                onToggleLike={() => void toggleLike(drama.id)}
+                onToggleSave={() => void toggleSave(drama.id)}
               />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-4 bg-black px-8 text-center">
@@ -328,15 +326,7 @@ function DramaFeed() {
               </div>
             )}
 
-            <div className="pointer-events-none absolute bottom-24 left-3 z-40">
-              <Link
-                href={`/drama/${drama.id}`}
-                className="pointer-events-auto rounded-full bg-black/45 px-3 py-1.5 text-[11px] font-medium backdrop-blur"
-              >
-                Semua episode · {index + 1}/{items.length}
-                {hasMore ? "+" : ""}
-              </Link>
-            </div>
+
           </section>
         );
       })}

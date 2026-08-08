@@ -343,16 +343,15 @@ function WatchContent() {
                   if (index < episodes.length - 1) scrollToIndex(index + 1);
                 }}
                 onBack={leaveWatch}
-                sideActions={
-                  <DramaEngageActions
-                    liked={liked}
-                    saved={saved}
-                    likesCount={likesCount}
-                    busy={engageBusy}
-                    onToggleLike={() => void toggleLike()}
-                    onToggleSave={() => void toggleSave()}
-                  />
-                }
+                dramaMeta={dramaMeta}
+                currentEp={ep}
+                episodes={episodes}
+                liked={liked}
+                saved={saved}
+                likesCount={likesCount}
+                onToggleLike={() => void toggleLike()}
+                onToggleSave={() => void toggleSave()}
+                onSelectEpisode={(idx) => scrollToIndex(idx)}
               />
             ) : (
               <div className="flex h-full flex-col items-center justify-center gap-4 bg-black px-8 text-center">
@@ -390,11 +389,7 @@ function WatchContent() {
               </div>
             )}
 
-            <div className="pointer-events-none absolute bottom-24 left-3 z-40">
-              <p className="rounded-full bg-black/45 px-3 py-1.5 text-[11px] font-medium text-white/80 backdrop-blur">
-                Ep {ep.episode} · {index + 1}/{episodes.length}
-              </p>
-            </div>
+
           </section>
         );
       })}

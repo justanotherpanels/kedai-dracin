@@ -40,9 +40,12 @@ type ResolvedPlayable = {
 
 function inferMediaType(playSrc: string, resolvedType?: string): string {
   if (resolvedType) return resolvedType;
-  if (playSrc.includes(".m3u8")) return "application/x-mpegURL";
-  if (playSrc.startsWith("/api/dood/stream")) return "video/mp4";
-  return "video/mp4";
+  const lower = playSrc.toLowerCase();
+  if (lower.includes(".mp4") || lower.startsWith("/api/dood/stream")) {
+    return "video/mp4";
+  }
+  // Default to HLS if it's an unknown format or extensionless URL
+  return "application/x-mpegURL";
 }
 
 /**
@@ -71,7 +74,7 @@ async function resolvePlayableSrc(raw: string): Promise<ResolvedPlayable> {
     }
     return {
       playSrc: data.src,
-      type: inferMediaType(data.src, data.type || "video/mp4"),
+      type: inferMediaType(data.src, data.type),
       poster: data.poster,
     };
   }
@@ -157,15 +160,6 @@ export function VerticalPlayer({
       if (mountRef.current) mountRef.current.innerHTML = "";
     };
 
-    const fitPlayer = (player: Player) => {
-      const box = playerBoxRef.current;
-      if (!box) return;
-      const w = box.clientWidth || 360;
-      const h = box.clientHeight || 640;
-      player.dimensions(w, h);
-      player.trigger("resize");
-    };
-
     const tryAutoPlay = async (player: Player) => {
       if (cancelled || !activeRef.current) return;
       try {
@@ -204,15 +198,14 @@ export function VerticalPlayer({
 
       mount.innerHTML = "";
       const videoEl = document.createElement("video");
-      videoEl.className = "video-js vjs-big-play-centered vjs-fill";
+      videoEl.className = "video-js vjs-big-play-centered";
       videoEl.setAttribute("playsinline", "true");
       videoEl.setAttribute("preload", "auto");
       mount.appendChild(videoEl);
 
       const player = videojs(videoEl, {
         controls: true,
-        fluid: false,
-        fill: true,
+        fluid: true,
         preload: "auto",
         playsinline: true,
         autoplay: false,
@@ -224,7 +217,7 @@ export function VerticalPlayer({
           vhs: { overrideNative: true },
           nativeAudioTracks: false,
           nativeVideoTracks: false,
-        },
+        }
       });
 
       player.addClass("vjs-vertical-player");
@@ -281,15 +274,19 @@ export function VerticalPlayer({
           return;
         }
 
-        fitPlayer(player);
         player.poster(resolved.poster || "");
-        player.src({ src: resolved.playSrc, type: resolved.type || "video/mp4" });
+
+        if (resolved.type) {
+          player.src({ src: resolved.playSrc, type: resolved.type });
+        } else {
+          // Should not happen since we now default to HLS, but just in case
+          player.src({ src: resolved.playSrc });
+        }
+
         await new Promise<void>((resolveReady) => {
           player.ready(() => resolveReady());
         });
         if (cancelled) return;
-        fitPlayer(player);
-        requestAnimationFrame(() => fitPlayer(player));
         setLoading(false);
         await tryAutoPlay(player);
       } catch (err) {
@@ -302,15 +299,8 @@ export function VerticalPlayer({
 
     void loadStream();
 
-    const onResize = () => {
-      const player = playerRef.current;
-      if (player && !player.isDisposed()) fitPlayer(player);
-    };
-    window.addEventListener("resize", onResize);
-
     return () => {
       cancelled = true;
-      window.removeEventListener("resize", onResize);
       disposePlayer();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -367,8 +357,8 @@ export function VerticalPlayer({
           : undefined
       }
     >
-      <div className="player-stage absolute inset-0">
-        <div ref={mountRef} className="absolute inset-0 h-full w-full" />
+      <div className="player-stage absolute inset-0 flex items-center justify-center">
+        <div ref={mountRef} className="w-full" />
       </div>
 
       <div

@@ -96,17 +96,14 @@ a {
   display: none;
 }
 
-/* Video.js vertical fill (doodplayer concept) */
-.player-stage .video-js,
-.player-stage .video-js.vjs-fill,
+/* Video.js default resets for vertical player */
 .vjs-vertical-player.video-js {
-  position: absolute !important;
-  inset: 0;
-  width: 100% !important;
-  height: 100% !important;
-  padding: 0 !important;
   background: #000;
   font-family: inherit;
+}
+
+.vjs-vertical-player .vjs-loading-spinner {
+  display: none !important;
 }
 
 .player-stage .video-js .vjs-tech,

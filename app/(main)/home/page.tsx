@@ -69,14 +69,12 @@ export default function HomePage() {
     let cancelled = false;
     void (async () => {
       try {
-        const promises = [
-          apiRequest<SliderItem[]>("/dashboard/slider", { token }),
-          apiRequest<Drama[]>("/play/trending", { token, query: { limit: 10 } }),
-          apiRequest<Drama[]>("/drama/most-liked", { token, query: { limit: 10 } }),
-          apiRequest<DramaProvider[]>("/provider", { token, query: { limit: 30 } }),
-        ];
-        promises.forEach((p) => p.catch(() => {}));
-        const [sliderRes, trendRes, likedRes, providerRes] = await Promise.all(promises);
+        const [sliderRes, trendRes, likedRes, providerRes] = await Promise.all([
+          apiRequest<SliderItem[]>("/dashboard/slider", { token }).catch(() => ({ data: null })),
+          apiRequest<Drama[]>("/play/trending", { token, query: { limit: 10 } }).catch(() => ({ data: null })),
+          apiRequest<Drama[]>("/drama/most-liked", { token, query: { limit: 10 } }).catch(() => ({ data: null })),
+          apiRequest<DramaProvider[]>("/provider", { token, query: { limit: 30 } }).catch(() => ({ data: null })),
+        ]);
         if (cancelled) return;
         setSliders((sliderRes.data ?? []).filter((item) => item?.drama));
         setTrending(trendRes.data ?? []);

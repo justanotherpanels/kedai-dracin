@@ -134,6 +134,8 @@ export function VerticalPlayer({
     activeRef.current = active;
   }, [active]);
 
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
   useEffect(() => {
     advancingRef.current = false;
   }, [src]);
@@ -277,10 +279,35 @@ export function VerticalPlayer({
       setIsPlaying(false);
       return;
     }
-    Promise.resolve(player.play()).catch(() => {
-      setIsPlaying(false);
-    });
+    
+    // Try to autoplay, if fails, mute and play
+    const tryPlay = async () => {
+      try {
+        await Promise.resolve(player.play());
+      } catch {
+        try {
+          player.muted(true);
+          await Promise.resolve(player.play());
+        } catch {
+          setIsPlaying(false);
+        }
+      }
+    };
+    
+    void tryPlay();
   }, [active]);
+
+  const handleShare = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const url = window.location.href;
+    navigator.clipboard.writeText(url).then(() => {
+      setToastMessage("Link berhasil disalin!");
+      setTimeout(() => setToastMessage(null), 2500);
+    }).catch(() => {
+      setToastMessage("Gagal menyalin link.");
+      setTimeout(() => setToastMessage(null), 2500);
+    });
+  };
 
   const togglePlay = (e: React.MouseEvent | React.TouchEvent) => {
     if (drawerOpen) {
@@ -520,7 +547,7 @@ export function VerticalPlayer({
           <span className="text-sm font-semibold drop-shadow-md">Simpan</span>
         </button>
 
-        <button onClick={(e) => { e.stopPropagation(); alert("Link disalin!"); }} className="flex flex-col items-center space-y-1 group pointer-events-auto">
+        <button onClick={handleShare} className="flex flex-col items-center space-y-1 group pointer-events-auto">
           <div className="p-2 rounded-full group-hover:bg-white/10 transition">
             <IconShare className="w-9 h-9 drop-shadow-lg text-white" />
           </div>
@@ -635,6 +662,11 @@ export function VerticalPlayer({
           </div>
         </div>
       </div>
+      {toastMessage && (
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-50 bg-black/80 text-white px-5 py-2.5 rounded-full text-sm font-medium backdrop-blur-md pointer-events-none transition-all shadow-xl">
+          {toastMessage}
+        </div>
+      )}
     </div>
   );
 }

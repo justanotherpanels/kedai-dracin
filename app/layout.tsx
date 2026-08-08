@@ -4,6 +4,7 @@ import Script from "next/script";
 import { Analytics } from "@vercel/analytics/next";
 import { SpeedInsights } from "@vercel/speed-insights/next";
 import { AuthProvider } from "@/components/AuthProvider";
+import { InstallPWA } from "@/components/InstallPWA";
 import { GOOGLE_ANALYTICS_ID, GOOGLE_SITE_VERIFICATION } from "@/lib/google";
 import "./globals.css";
 
@@ -28,6 +29,7 @@ const displayFont = Outfit({
 export const metadata: Metadata = {
   title: "Kedai Dracin",
   description: "Platform drama terlengkap — nonton drama vertikal",
+  manifest: "/manifest.json",
   icons: {
     icon: [{ url: "/favicon.png", type: "image/png" }],
     apple: [{ url: "/favicon.png" }],
@@ -79,6 +81,7 @@ export default function RootLayout({
           </>
         )}
         <AuthProvider>{children}</AuthProvider>
+        <InstallPWA />
         <Analytics />
         <SpeedInsights />
       </body>

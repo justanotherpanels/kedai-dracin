@@ -1,0 +1,21 @@
+{
+  "name": "Kedai Dracin",
+  "short_name": "Kedai Dracin",
+  "description": "Platform drama terlengkap \u2014 nonton drama vertikal",
+  "start_url": "/home",
+  "display": "standalone",
+  "background_color": "#07060a",
+  "theme_color": "#0c0a0f",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/favicon.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

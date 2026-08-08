@@ -116,11 +116,19 @@ function DramaFeed() {
   );
 
   useEffect(() => {
-    const nearby = [activeIndex - 1, activeIndex, activeIndex + 1];
-    for (const i of nearby) {
-      const drama = items[i];
-      if (drama) void loadEpisode(drama);
-    }
+    const activeDrama = items[activeIndex];
+    if (activeDrama) void loadEpisode(activeDrama);
+
+    // Preload next and prev after a delay to prioritize active video
+    const timer = setTimeout(() => {
+      const prevDrama = items[activeIndex - 1];
+      if (prevDrama) void loadEpisode(prevDrama);
+
+      const nextDrama = items[activeIndex + 1];
+      if (nextDrama) void loadEpisode(nextDrama);
+    }, 1500);
+
+    return () => clearTimeout(timer);
   }, [activeIndex, items, loadEpisode]);
 
   useEffect(() => {
